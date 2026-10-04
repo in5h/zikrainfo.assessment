@@ -8,9 +8,9 @@ import { LOCAL_EXPERT_PROMPT, SYSTEM_PROMPT } from "./knowledge";
 import { OfflinePlannerModel } from "./offline-model";
 import { allTools, expertTools } from "./tools";
 
-import { MAIN_MODEL, SUBAGENT_MODEL } from "@/lib/config";
+import { MAIN_MODEL, SUBAGENT_MODEL, resolveApiKey } from "@/lib/config";
 
-export { MAIN_MODEL, SUBAGENT_MODEL };
+export { MAIN_MODEL, SUBAGENT_MODEL, resolveApiKey };
 
 export function anthropic(model: string, effort: "low" | "medium" | "high", apiKey: string) {
   // Current Claude models reject sampling params (temperature/top_p) and run
@@ -18,10 +18,6 @@ export function anthropic(model: string, effort: "low" | "medium" | "high", apiK
   return new ChatAnthropic({ model, apiKey, maxTokens: 16000, outputConfig: { effort } });
 }
 
-/** Server key wins; otherwise a key the user pasted into the app (sent per request, never stored server-side). */
-export function resolveApiKey(fromRequest?: string | null) {
-  return process.env.ANTHROPIC_API_KEY || fromRequest?.trim() || null;
-}
 
 /**
  * The harness: a LangGraph Deep Agent with

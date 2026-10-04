@@ -1,8 +1,7 @@
 import { z } from "zod";
 
-import { resolveApiKey } from "@/lib/agent/agent";
 import type { AgentEvent } from "@/lib/agent/events";
-import { runTurn } from "@/lib/agent/run";
+import { resolveApiKey } from "@/lib/config";
 import { getRepo } from "@/lib/data/repo";
 import type { Thread, Trip } from "@/lib/data/types";
 import { handle } from "@/lib/server/handle";
@@ -37,6 +36,10 @@ export const POST = handle(async (req: Request) => {
   }
   if (!(await repo.getTrip(tripId))) return Response.json({ error: "Unknown trip" }, { status: 404 });
 
+  // Loaded on demand so a problem in the agent stack comes back as a readable
+  // error (via handle) instead of crashing the route at import time.
+  const { runTurn } = await import("@/lib/agent/run");
+
   // No key → demo mode: a deterministic offline model drives the same harness.
   const apiKey = resolveApiKey(req.headers.get("x-anthropic-key"));
   const encoder = new TextEncoder();
@@ -51,6 +54,10 @@ export const POST = handle(async (req: Request) => {
           }
           send(controller, event);
         }
+      } catch (e) {
+        console.error("[chat]", e);
+        send(controller, { type: "error", message: e instanceof Error ? e.message : String(e) });
+        send(controller, { type: "done" });
       } finally {
         controller.close();
       }

@@ -27,3 +27,8 @@ export function supabaseConfig(): { url: string; key: string } | null {
     (url === DEMO_SUPABASE_URL ? DEMO_SUPABASE_ANON_KEY : "");
   return url && key ? { url, key } : null;
 }
+
+/** Server key wins; otherwise a key sent with the request. null → demo mode (offline planner). */
+export function resolveApiKey(fromRequest?: string | null) {
+  return process.env.ANTHROPIC_API_KEY || fromRequest?.trim() || null;
+}
