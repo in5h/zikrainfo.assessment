@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "smoke": "node --conditions=react-server --import tsx scripts/smoke.ts",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "seed:sql": "node --import tsx scripts/seed-sql.ts > supabase/seed.sql"
   },
   "dependencies": {
     "@langchain/anthropic": "^1.5.12",
