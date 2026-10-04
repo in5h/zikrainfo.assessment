@@ -35,7 +35,7 @@ Restart `npm run dev`. The badge in the top-right changes from **Demo mode** to 
 
 ### Optional: save trips in Supabase
 
-Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env.local`, and run `supabase/migrations/0001_init.sql` once in the Supabase SQL editor. Without Supabase, trips are kept in memory until you restart.
+Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env.local`, and run `supabase/migrations/0001_init.sql` once in the Supabase SQL editor. Without Supabase, trips are saved in your browser.
 
 ---
 
@@ -68,7 +68,7 @@ Next.js route handlers (Node runtime, maxDuration 300s)
   │     └── subagent: local-expert (isolated context: shortlist by neighbourhood)
   │
   └── Repo  ──►  Supabase Postgres: cities · places · trips · threads
-                 (in-memory fallback when Supabase isn't configured)
+                 (no database configured → trips live in the visitor's browser and are sent with each request)
 ```
 
 Key files:
@@ -95,10 +95,18 @@ npm run build
 
 `npm run smoke` plans real trips through the full Deep Agent graph (tools, subagent, skills, repo), for every city × pace combination. It also tests refinements and the checker's rules: closed days, missing lunch, impossible timing, over budget.
 
-## Deploy (Vercel + Supabase)
+## Deploy to Vercel (no keys needed)
 
-1. Supabase: create a project, run `supabase/migrations/0001_init.sql`. The catalog seeds itself on the first request.
-2. Vercel: import the repo and set `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and optionally `ANTHROPIC_API_KEY`. Deploy.
+1. Go to https://vercel.com, sign in with GitHub, click **Add New… → Project**, and import this repo.
+2. Leave every setting as it is. **Don't add any environment variables.**
+3. Click **Deploy**. In about 2 minutes you get a public link such as `https://your-project.vercel.app`.
+
+With no keys, the app runs in **demo mode** (offline planner) and **saves each visitor's trips in their own browser** (localStorage). The browser sends its trip along with every request, so it works across Vercel's stateless serverless instances. Both are optional upgrades:
+
+| Add this env var in Vercel | What changes |
+|---|---|
+| `ANTHROPIC_API_KEY` | Claude plans trips and answers free-form chat |
+| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (and run `supabase/migrations/0001_init.sql`) | Trips are stored in Postgres instead of the browser |
 
 Security: RLS is on for every table with no public policies. All data access goes through server routes using the service-role key.
 

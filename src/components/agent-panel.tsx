@@ -9,7 +9,7 @@ import { ToolStep, type Step } from "@/components/tool-step";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import type { AgentEvent, TranscriptEntry } from "@/lib/agent/events";
-import type { StoredFile, Todo } from "@/lib/data/types";
+import type { StoredFile, Thread, Todo, Trip } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 type Item = { role: "user"; text: string } | { role: "assistant"; text: string; steps: Step[]; error?: string };
@@ -84,6 +84,8 @@ function StepGroup({ steps, live }: { steps: Step[]; live: boolean }) {
 export function AgentPanel({
   ref,
   tripId,
+  extraBody,
+  onState,
   title,
   suggestions,
   transcript,
@@ -96,6 +98,9 @@ export function AgentPanel({
 }: {
   ref?: Ref<AgentPanelHandle>;
   tripId: string;
+  /** Browser-storage mode: extra fields (the browser's trip + thread) sent with each message. */
+  extraBody?: () => Record<string, unknown>;
+  onState?: (trip: Trip, thread: Thread | null) => void;
   title: string;
   suggestions: string[];
   transcript: TranscriptEntry[];
@@ -139,7 +144,7 @@ export function AgentPanel({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ tripId, message }),
+        body: JSON.stringify({ tripId, message, ...(extraBody?.() ?? {}) }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -180,6 +185,9 @@ export function AgentPanel({
               break;
             case "files":
               onFiles?.(ev.files);
+              break;
+            case "state":
+              onState?.(ev.trip, ev.thread);
               break;
             case "trip_saved":
               onSaved?.();

@@ -8,7 +8,8 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const claude = Boolean(process.env.ANTHROPIC_API_KEY);
   return NextResponse.json({
-    storage: getRepo().kind,
+    // "browser" = no database configured: each visitor's trips live in their own browser.
+    storage: getRepo().kind === "memory" ? "browser" : "supabase",
     // "demo" = no key configured: the offline planner drives the same agent harness.
     mode: claude ? "claude" : "demo",
     model: claude ? MAIN_MODEL : "offline planner",

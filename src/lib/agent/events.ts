@@ -1,4 +1,4 @@
-import type { StoredFile, Todo } from "@/lib/data/types";
+import type { StoredFile, Thread, Todo, Trip } from "@/lib/data/types";
 
 /** Events streamed from /api/chat to the browser as NDJSON. */
 export type AgentEvent =
@@ -8,6 +8,8 @@ export type AgentEvent =
   | { type: "todos"; todos: Todo[] }
   | { type: "files"; files: Record<string, StoredFile> }
   | { type: "trip_saved" }
+  /** Browser-storage mode only: the updated trip + conversation for the browser to keep. */
+  | { type: "state"; trip: Trip; thread: Thread | null }
   | { type: "done" }
   | { type: "error"; message: string };
 

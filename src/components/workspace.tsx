@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { TranscriptEntry } from "@/lib/agent/events";
 import type { TripCheck } from "@/lib/agent/itinerary";
 import type { City, StoredFile, Todo, Trip } from "@/lib/data/types";
+import { tripStore } from "@/lib/client/trip-store";
 import { cn } from "@/lib/utils";
 
 const Globe = dynamic(() => import("@/components/globe").then((m) => m.Globe), {
@@ -37,7 +38,7 @@ const Globe = dynamic(() => import("@/components/globe").then((m) => m.Globe), {
   loading: () => <div className="aspect-square w-full animate-pulse rounded-full bg-teal-900/10" />,
 });
 
-type Status = { storage: "supabase" | "memory"; mode: "claude" | "demo"; model: string };
+type Status = { storage: "supabase" | "browser"; mode: "claude" | "demo"; model: string };
 type Detail = {
   trip: Trip;
   city: City;
@@ -140,23 +141,40 @@ export function Workspace() {
   const panel = useRef<AgentPanelHandle>(null);
   const autoPlan = useRef<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/status").then((r) => r.json()).then(setStatus).catch(() => {});
-    Promise.all([fetch("/api/cities").then((r) => r.json()), fetch("/api/trips").then((r) => r.json())])
-      .then(([c, t]) => {
-        if (c.error || t.error) throw new Error(c.error ?? t.error);
-        setCities(c.cities);
-        setTrips(t.trips);
-      })
-      .catch((e) => setError(e.message));
+  // No database on the server → trips live in this browser (see trip-store.ts).
+  const browser = useRef(false);
+
+  const listTrips = useCallback(
+    async (): Promise<Trip[]> => (browser.current ? tripStore.list() : ((await fetch("/api/trips").then((r) => r.json())).trips ?? [])),
+    []
+  );
+  const fetchDetail = useCallback(async (id: string): Promise<Detail> => {
+    if (!browser.current) return fetch(`/api/trips/${id}`).then((r) => r.json());
+    return fetch("/api/trips/view", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trip: tripStore.get(id), thread: tripStore.getThread(id) }),
+    }).then((r) => r.json());
   }, []);
+
+  useEffect(() => {
+    (async () => {
+      const st: Status = await fetch("/api/status").then((r) => r.json());
+      browser.current = st.storage === "browser";
+      setStatus(st);
+      const [c, t] = await Promise.all([fetch("/api/cities").then((r) => r.json()), listTrips()]);
+      if (c.error) throw new Error(c.error);
+      setCities(c.cities);
+      setTrips(t);
+    })().catch((e) => setError(e.message));
+  }, [listTrips]);
 
   const globeCities = useMemo<GlobeCity[]>(
     () => cities.map((c) => ({ id: c.id, name: c.name, country: c.country, lat: c.center[0], lng: c.center[1], emoji: CITY_STYLE[c.id]?.emoji ?? "📍", side: LABEL_SIDE[c.id] })),
     [cities]
   );
 
-  const loadTrips = useCallback(() => fetch("/api/trips").then((r) => r.json()).then((d) => setTrips(d.trips ?? [])), []);
+  const loadTrips = useCallback(() => listTrips().then(setTrips), [listTrips]);
 
   const select = useCallback((id: string | null) => {
     setSelected(id);
@@ -165,25 +183,21 @@ export function Workspace() {
     setShowTrips(false);
     setTodos([]);
     if (id)
-      fetch(`/api/trips/${id}`)
-        .then((r) => r.json())
-        .then((d: Detail) => {
-          setDetail(d);
-          setTodos(d.todos ?? []);
-        });
+      fetchDetail(id).then((d) => {
+        setDetail(d);
+        setTodos(d.todos ?? []);
+      });
     window.scrollTo({ top: 0 });
-  }, []);
+  }, [fetchDetail]);
 
   const refresh = useCallback(() => {
     loadTrips();
-    if (selected)
-      fetch(`/api/trips/${selected}`)
-        .then((r) => r.json())
-        .then((d) => setDetail((prev) => (prev ? { ...prev, trip: d.trip, check: d.check, files: d.files } : prev)));
-  }, [selected, loadTrips]);
+    if (selected) fetchDetail(selected).then((d) => setDetail((prev) => (prev ? { ...prev, trip: d.trip, check: d.check, files: d.files } : prev)));
+  }, [selected, loadTrips, fetchDetail]);
 
   async function remove(id: string) {
-    await fetch(`/api/trips/${id}`, { method: "DELETE" });
+    if (browser.current) tripStore.remove(id);
+    else await fetch(`/api/trips/${id}`, { method: "DELETE" });
     if (selected === id) select(null);
     loadTrips();
   }
@@ -252,7 +266,7 @@ export function Workspace() {
           )}
           {status && (
             <Badge variant="outline" className="hidden gap-1 md:inline-flex">
-              <Database className="size-3" /> {status.storage === "supabase" ? "Supabase" : "In-memory"}
+              <Database className="size-3" /> {status.storage === "supabase" ? "Supabase" : "Saved in this browser"}
             </Badge>
           )}
           {selected && (
@@ -290,6 +304,7 @@ export function Workspace() {
                   cityId={cityId}
                   onCity={setCityId}
                   onCreated={(t) => {
+                    if (browser.current) tripStore.save(t);
                     autoPlan.current = t.id;
                     loadTrips();
                     select(t.id);
@@ -395,6 +410,11 @@ export function Workspace() {
                 onTodos={setTodos}
                 onFiles={() => {}}
                 onSaved={refresh}
+                extraBody={() => (browser.current && selected ? { trip: tripStore.get(selected), thread: tripStore.getThread(selected) } : {})}
+                onState={(t, th) => {
+                  tripStore.save(t);
+                  tripStore.saveThread(t.id, th);
+                }}
                 onBusy={setBusy}
               />
             ) : (
