@@ -4,7 +4,7 @@ Pick a city, dates, a budget and your interests. Wayfarer's agent plans a day-by
 
 **It works with no API key.** Without `ANTHROPIC_API_KEY`, a built-in offline planner drives the same agent harness, so every feature works on your laptop straight away. Add a key and Claude takes over the planning and free-form chat.
 
-> Stack: Next.js 16 (App Router) · Tailwind v4 · shadcn/ui · Supabase (Postgres) · LangGraph **Deep Agents** (`deepagents` JS) · Claude via `@langchain/anthropic` · Leaflet maps · Vercel.
+> Stack: Next.js 16 (App Router) · Tailwind v4 · shadcn/ui · Supabase (Postgres) · LangGraph **Deep Agents** (`deepagents` JS) · Claude via `@langchain/anthropic` · three.js globe · Leaflet maps · Vercel.
 
 See **[NOTES.md](./NOTES.md)** for the written submission note.
 
@@ -21,7 +21,7 @@ npm install
 npm run dev
 ```
 
-Open **http://localhost:3000**, pick a city and click **Plan my trip**. That's it: no keys, no database.
+Open **http://localhost:3000**. Spin the 3D globe or pick a city, follow the 3 steps (*Where → When & budget → Your vibe*) and click **Plan my trip**. That's it: no keys, no database.
 
 ### Optional: use Claude instead of the offline planner
 
@@ -55,7 +55,7 @@ Add `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to `.env.local`, and run `sup
 ## Architecture
 
 ```
-Browser (Next.js client: trip form · Leaflet map · timeline · agent panel)
+Browser (Next.js client: three.js globe · 3-step wizard · Leaflet map · timeline · agent panel)
   │  POST /api/chat  ──►  NDJSON stream of agent events (tokens, tool calls, todos, files)
   ▼
 Next.js route handlers (Node runtime, maxDuration 300s)

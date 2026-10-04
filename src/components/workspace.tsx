@@ -1,11 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { CalendarDays, Compass, Database, FolderOpen, Map as MapIcon, Plus, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import dynamic from "next/dynamic";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Compass,
+  Database,
+  FolderOpen,
+  Loader2,
+  Luggage,
+  MousePointerClick,
+  Plus,
+  RefreshCw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { AgentPanel, type AgentPanelHandle } from "@/components/agent-panel";
+import type { GlobeCity } from "@/components/globe";
 import { ItineraryView } from "@/components/itinerary-view";
-import { CITY_STYLE, TripForm } from "@/components/trip-form";
+import { CITY_STYLE, TripWizard } from "@/components/trip-wizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,6 +31,11 @@ import type { TranscriptEntry } from "@/lib/agent/events";
 import type { TripCheck } from "@/lib/agent/itinerary";
 import type { City, StoredFile, Todo, Trip } from "@/lib/data/types";
 import { cn } from "@/lib/utils";
+
+const Globe = dynamic(() => import("@/components/globe").then((m) => m.Globe), {
+  ssr: false,
+  loading: () => <div className="aspect-square w-full animate-pulse rounded-full bg-teal-900/10" />,
+});
 
 type Status = { storage: "supabase" | "memory"; mode: "claude" | "demo"; model: string };
 type Detail = {
@@ -24,6 +47,10 @@ type Detail = {
   todos: Todo[];
 };
 
+const LABEL_SIDE: Record<string, "left" | "right"> = { lisbon: "left", rome: "right" };
+
+const DEFAULT_STEPS = ["Read the trip request", "Get local recommendations", "Draft day-by-day plan", "Check hours, travel, meals & budget", "Save itinerary + checklist"];
+
 const fmtRange = (t: Trip) => {
   const s = new Date(`${t.start_date}T12:00:00Z`);
   const e = new Date(s);
@@ -32,13 +59,82 @@ const fmtRange = (t: Trip) => {
   return t.days_count === 1 ? s.toLocaleDateString(undefined, o) : `${s.toLocaleDateString(undefined, o)} – ${e.toLocaleDateString(undefined, o)}`;
 };
 
+function TripChip({ t, active, onOpen, onDelete, disabled }: { t: Trip; active?: boolean; onOpen: () => void; onDelete: () => void; disabled?: boolean }) {
+  const st = CITY_STYLE[t.city_id];
+  return (
+    <div className={cn("group flex items-center gap-2.5 rounded-2xl border bg-card p-2 transition hover:border-primary/40 hover:shadow-sm", active && "border-primary ring-1 ring-primary")}>
+      <button type="button" disabled={disabled} onClick={onOpen} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        <div className={cn("flex size-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br text-xl", st?.gradient)}>{st?.emoji ?? "📍"}</div>
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium">{t.status === "planned" ? t.title : `${t.title} · draft`}</div>
+          <div className="text-xs text-muted-foreground">
+            {fmtRange(t)}
+            {t.status === "planned" && ` · $${t.total_cost}`}
+          </div>
+        </div>
+      </button>
+      <button type="button" onClick={onDelete} disabled={disabled} className="rounded-lg p-1.5 text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:bg-red-50 hover:text-red-600" title="Delete trip">
+        <Trash2 className="size-3.5" />
+      </button>
+    </div>
+  );
+}
+
+function PlanningProgress({ todos, busy, city, onStart }: { todos: Todo[]; busy: boolean; city: City; onStart: () => void }) {
+  const steps = todos.length ? todos : DEFAULT_STEPS.map((content) => ({ content, status: "pending" as const }));
+  const done = steps.filter((s) => s.status === "completed").length;
+  return (
+    <div className="overflow-hidden rounded-3xl border bg-card shadow-sm">
+      <div className="h-1.5 bg-muted">
+        <div className="h-full bg-gradient-to-r from-teal-500 to-cyan-500 transition-all duration-700" style={{ width: `${busy ? Math.max(8, (done / steps.length) * 100) : 0}%` }} />
+      </div>
+      <div className="grid gap-6 p-6 sm:grid-cols-[auto_1fr] sm:p-8">
+        <div className="relative mx-auto flex size-28 items-center justify-center">
+          <div className={cn("absolute inset-0 rounded-full bg-gradient-to-br from-teal-200 to-amber-100", busy && "animate-pulse")} />
+          <Compass className={cn("relative size-14 text-teal-700", busy && "animate-[spin_6s_linear_infinite]")} />
+        </div>
+        <div>
+          <h2 className="font-display text-2xl font-semibold">{busy ? `Planning your ${city.name} trip…` : "Ready when you are"}</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {busy
+              ? "Your agent is shortlisting places, drafting each day and checking every stop. This takes a few seconds."
+              : "Your agent will draft each day and check opening hours, travel times, meals and budget."}
+          </p>
+          <ul className="mt-4 space-y-2">
+            {steps.map((s, i) => (
+              <li key={i} className={cn("flex items-center gap-2 text-sm transition", s.status === "pending" && "text-muted-foreground")}>
+                {s.status === "completed" ? (
+                  <CheckCircle2 className="size-4 text-emerald-600" />
+                ) : s.status === "in_progress" ? (
+                  <Loader2 className="size-4 animate-spin text-primary" />
+                ) : (
+                  <Circle className="size-4" />
+                )}
+                {s.content}
+              </li>
+            ))}
+          </ul>
+          {!busy && (
+            <Button className="mt-5" onClick={onStart}>
+              <Sparkles /> Plan this trip
+            </Button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Workspace() {
   const [status, setStatus] = useState<Status | null>(null);
   const [cities, setCities] = useState<City[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
+  const [cityId, setCityId] = useState("lisbon");
   const [selected, setSelected] = useState<string | null>(null);
   const [detail, setDetail] = useState<Detail | null>(null);
+  const [todos, setTodos] = useState<Todo[]>([]);
   const [busy, setBusy] = useState(false);
+  const [showTrips, setShowTrips] = useState(false);
   const [showFiles, setShowFiles] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const panel = useRef<AgentPanelHandle>(null);
@@ -55,22 +151,28 @@ export function Workspace() {
       .catch((e) => setError(e.message));
   }, []);
 
+  const globeCities = useMemo<GlobeCity[]>(
+    () => cities.map((c) => ({ id: c.id, name: c.name, country: c.country, lat: c.center[0], lng: c.center[1], emoji: CITY_STYLE[c.id]?.emoji ?? "📍", side: LABEL_SIDE[c.id] })),
+    [cities]
+  );
+
   const loadTrips = useCallback(() => fetch("/api/trips").then((r) => r.json()).then((d) => setTrips(d.trips ?? [])), []);
 
-  const loadDetail = useCallback(async (id: string) => {
-    const d = await fetch(`/api/trips/${id}`).then((r) => r.json());
-    setDetail(d);
+  const select = useCallback((id: string | null) => {
+    setSelected(id);
+    setDetail(null);
+    setShowFiles(false);
+    setShowTrips(false);
+    setTodos([]);
+    if (id)
+      fetch(`/api/trips/${id}`)
+        .then((r) => r.json())
+        .then((d: Detail) => {
+          setDetail(d);
+          setTodos(d.todos ?? []);
+        });
+    window.scrollTo({ top: 0 });
   }, []);
-
-  const select = useCallback(
-    (id: string | null) => {
-      setSelected(id);
-      setDetail(null);
-      setShowFiles(false);
-      if (id) loadDetail(id);
-    },
-    [loadDetail]
-  );
 
   const refresh = useCallback(() => {
     loadTrips();
@@ -87,13 +189,16 @@ export function Workspace() {
   }
 
   // A freshly created trip starts planning as soon as its agent panel mounts.
-  const onPanelReady = useCallback((handle: AgentPanelHandle | null) => {
-    panel.current = handle;
-    if (handle && autoPlan.current && autoPlan.current === selected) {
-      autoPlan.current = null;
-      setTimeout(() => handle.send("Plan this trip."), 50);
-    }
-  }, [selected]);
+  const onPanelReady = useCallback(
+    (handle: AgentPanelHandle | null) => {
+      panel.current = handle;
+      if (handle && autoPlan.current && autoPlan.current === selected) {
+        autoPlan.current = null;
+        setTimeout(() => handle.send("Plan this trip."), 50);
+      }
+    },
+    [selected]
+  );
 
   if (error) {
     return (
@@ -110,215 +215,194 @@ export function Workspace() {
 
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh">
-      <header className="flex flex-wrap items-center gap-3 border-b bg-card/60 px-4 py-2.5 backdrop-blur">
-        <button type="button" onClick={() => select(null)} className="flex items-center gap-2">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-gradient-to-br from-teal-500 to-cyan-600 text-white shadow-sm">
+      {/* Header */}
+      <header className="sticky top-0 z-[1100] flex items-center gap-3 border-b bg-background/80 px-4 py-2.5 backdrop-blur-md">
+        <button type="button" onClick={() => select(null)} className="flex items-center gap-2" disabled={busy}>
+          <div className="flex size-8 items-center justify-center rounded-xl bg-gradient-to-br from-teal-500 to-cyan-600 text-white shadow-sm">
             <Compass className="size-4.5" />
           </div>
-          <div className="text-left leading-tight">
-            <div className="font-display text-lg font-semibold">Wayfarer</div>
-            <div className="text-[11px] text-muted-foreground">AI trip planner that checks the details</div>
-          </div>
+          <span className="font-display text-xl font-semibold">Wayfarer</span>
         </button>
+
+        <div className="relative ml-2">
+          <Button variant="ghost" size="sm" onClick={() => setShowTrips((v) => !v)}>
+            <Luggage /> My trips{trips.length > 0 && <span className="rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground">{trips.length}</span>}
+            <ChevronDown className={cn("transition-transform", showTrips && "rotate-180")} />
+          </Button>
+          {showTrips && (
+            <div className="absolute top-full left-0 mt-2 w-80 space-y-1.5 rounded-2xl border bg-popover p-2 shadow-xl">
+              {trips.length === 0 ? (
+                <p className="p-3 text-sm text-muted-foreground">No trips yet. Plan your first one!</p>
+              ) : (
+                trips.map((t) => <TripChip key={t.id} t={t} active={t.id === selected} disabled={busy} onOpen={() => select(t.id)} onDelete={() => remove(t.id)} />)
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="ml-auto flex items-center gap-2">
           {status && (
-            <>
-              <Badge
-                variant="outline"
-                className={cn("gap-1", status.mode === "demo" && "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300")}
-                title={status.mode === "demo" ? "No ANTHROPIC_API_KEY: an offline planner drives the same agent harness." : undefined}
-              >
-                <Sparkles className="size-3" /> {status.mode === "demo" ? "Demo mode · offline planner" : status.model}
-              </Badge>
-              <Badge variant="outline" className="hidden gap-1 sm:inline-flex">
-                <Database className="size-3" /> {status.storage === "supabase" ? "Supabase" : "In-memory"}
-              </Badge>
-            </>
+            <Badge
+              variant="outline"
+              className={cn("hidden gap-1 sm:inline-flex", status.mode === "demo" && "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300")}
+              title={status.mode === "demo" ? "No ANTHROPIC_API_KEY set: an offline planner drives the same agent harness." : undefined}
+            >
+              <Sparkles className="size-3" /> {status.mode === "demo" ? "Demo mode" : status.model}
+            </Badge>
+          )}
+          {status && (
+            <Badge variant="outline" className="hidden gap-1 md:inline-flex">
+              <Database className="size-3" /> {status.storage === "supabase" ? "Supabase" : "In-memory"}
+            </Badge>
+          )}
+          {selected && (
+            <Button size="sm" onClick={() => select(null)} disabled={busy}>
+              <Plus /> New trip
+            </Button>
           )}
         </div>
       </header>
 
-      <div className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[340px_minmax(0,1fr)_400px]">
-        {/* Left: new trip + saved trips */}
-        <aside className="space-y-6 border-b p-4 lg:min-h-0 lg:overflow-y-auto lg:border-r lg:border-b-0">
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="font-display text-lg font-semibold">New trip</h2>
-              {selected && (
-                <Button size="sm" variant="ghost" onClick={() => select(null)}>
-                  <Plus /> New
-                </Button>
-              )}
-            </div>
-            {cities.length ? (
-              <TripForm
-                cities={cities}
-                busy={busy}
-                onCreated={(t) => {
-                  autoPlan.current = t.id;
-                  loadTrips();
-                  select(t.id);
-                }}
-              />
-            ) : (
-              <Skeleton className="h-96" />
-            )}
+      {!selected ? (
+        /* ------------------------------------------------------------- Home */
+        <main className="relative flex-1 overflow-y-auto">
+          <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+            <div className="absolute -top-40 -left-40 size-[36rem] rounded-full bg-teal-200/40 blur-3xl" />
+            <div className="absolute top-40 -right-40 size-[32rem] rounded-full bg-amber-200/40 blur-3xl" />
           </div>
-
-          <div>
-            <h2 className="mb-2 font-display text-lg font-semibold">Your trips</h2>
-            {trips.length === 0 && <p className="text-sm text-muted-foreground">No trips yet. Plan your first one above.</p>}
-            <div className="space-y-1.5">
-              {trips.map((t) => {
-                const st = CITY_STYLE[t.city_id];
-                return (
-                  <div
-                    key={t.id}
-                    className={cn("group flex items-center gap-2.5 rounded-xl border bg-card p-2 transition hover:border-primary/40", selected === t.id && "border-primary ring-1 ring-primary")}
-                  >
-                    <button type="button" disabled={busy} onClick={() => select(t.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
-                      <div className={cn("flex size-10 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br text-lg", st?.gradient)}>{st?.emoji ?? "📍"}</div>
-                      <div className="min-w-0">
-                        <div className="truncate text-sm font-medium">{t.status === "planned" ? t.title : `${t.title} (draft)`}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {fmtRange(t)}
-                          {t.status === "planned" && ` · $${t.total_cost}`}
-                        </div>
-                      </div>
-                    </button>
-                    <button type="button" onClick={() => remove(t.id)} disabled={busy} className="rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:text-red-600" title="Delete trip">
-                      <Trash2 className="size-3.5" />
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </aside>
-
-        {/* Center */}
-        <main className="lg:min-h-0 lg:overflow-y-auto">
-          {!selected ? (
-            <div className="flex h-full flex-col items-center justify-center p-8 text-center">
-              <div className="relative mb-6">
-                <div className="absolute inset-0 rounded-full bg-gradient-to-br from-teal-300 to-amber-200 opacity-60 blur-2xl" />
-                <div className="relative flex size-24 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-cyan-600 text-white shadow-lg">
-                  <MapIcon className="size-10" />
-                </div>
+          <div className="relative mx-auto grid max-w-6xl items-center gap-8 px-4 py-8 lg:grid-cols-[minmax(0,460px)_1fr] lg:py-12">
+            <div className="space-y-6">
+              <div>
+                <span className="inline-flex items-center gap-1.5 rounded-full border bg-card/70 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
+                  <Sparkles className="size-3 text-primary" /> AI trip planner · every stop checked
+                </span>
+                <h1 className="mt-4 font-display text-4xl leading-[1.1] font-semibold sm:text-5xl">
+                  City trips that <span className="bg-gradient-to-r from-teal-600 to-cyan-500 bg-clip-text text-transparent">actually work</span>.
+                </h1>
+                <p className="mt-3 text-muted-foreground">
+                  Tell us where, when and what you love. Your agent plans each day, then checks opening hours, walking times,
+                  meals and budget, so you don&apos;t have to.
+                </p>
               </div>
-              <h1 className="font-display text-4xl font-semibold">Where to next?</h1>
-              <p className="mt-3 max-w-md text-muted-foreground">
-                Pick a city, your dates, budget and interests. The agent drafts a day-by-day plan, then checks every stop
-                for opening hours, walking time, meals and budget before it shows you anything.
-              </p>
-              <div className="mt-8 grid max-w-xl grid-cols-1 gap-3 text-left text-sm sm:grid-cols-3">
-                {[
-                  ["🗺️", "Clustered days", "Neighbourhoods grouped so you walk, not commute."],
-                  ["⏰", "Really open", "Closed Mondays and early closings handled."],
-                  ["💸", "On budget", "Tickets, meals and transit add up to your limit."],
-                ].map(([e, t, d]) => (
-                  <div key={t} className="rounded-xl border bg-card p-3">
-                    <div className="text-xl">{e}</div>
-                    <div className="mt-1 font-medium">{t}</div>
-                    <div className="text-xs text-muted-foreground">{d}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : !detail || !trip ? (
-            <div className="space-y-4 p-6">
-              <Skeleton className="h-12 w-2/3" />
-              <Skeleton className="h-20" />
-              <Skeleton className="h-80" />
-            </div>
-          ) : (
-            <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
-              <div className={cn("relative overflow-hidden rounded-2xl bg-gradient-to-br p-5 text-white shadow-sm", CITY_STYLE[trip.city_id]?.gradient)}>
-                <div className="absolute -top-4 -right-2 text-8xl opacity-25">{CITY_STYLE[trip.city_id]?.emoji}</div>
-                <div className="relative">
-                  <div className="flex items-center gap-1.5 text-sm opacity-90">
-                    <CalendarDays className="size-4" /> {fmtRange(trip)} · {detail.city.name}, {detail.city.country}
-                  </div>
-                  <h1 className="mt-1 font-display text-3xl font-semibold drop-shadow-sm">{trip.status === "planned" ? trip.title : `Planning ${detail.city.name}…`}</h1>
-                  {trip.summary && <p className="mt-2 max-w-2xl text-sm opacity-95">{trip.summary}</p>}
-                  <div className="mt-3 flex flex-wrap gap-1.5">
-                    {[trip.pace, ...trip.interests].map((x) => (
-                      <span key={x} className="rounded-full bg-white/25 px-2.5 py-0.5 text-xs capitalize backdrop-blur">
-                        {x}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {detail.check ? (
-                <ItineraryView trip={trip} city={detail.city} check={detail.check} />
+              {cities.length ? (
+                <TripWizard
+                  cities={cities}
+                  cityId={cityId}
+                  onCity={setCityId}
+                  onCreated={(t) => {
+                    autoPlan.current = t.id;
+                    loadTrips();
+                    select(t.id);
+                  }}
+                />
               ) : (
-                <div className="rounded-2xl border border-dashed bg-card p-10 text-center">
-                  <Sparkles className="mx-auto mb-3 size-6 text-primary" />
-                  <div className="font-medium">{busy ? "Your agent is planning…" : "Ready to plan"}</div>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {busy ? "Watch it work on the right: shortlist, draft, check, fix, save." : "Click the button and the agent will build your itinerary."}
-                  </p>
-                  {!busy && (
-                    <Button className="mt-4" onClick={() => panel.current?.send("Plan this trip.")}>
-                      <Sparkles /> Plan this trip
-                    </Button>
-                  )}
-                </div>
+                <Skeleton className="h-96 rounded-3xl" />
               )}
-
-              {detail.check && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button variant="outline" size="sm" disabled={busy} onClick={() => panel.current?.send("Re-plan this trip from scratch.")}>
-                    <RefreshCw /> Re-plan
-                  </Button>
-                  {files.length > 0 && (
-                    <Button variant="ghost" size="sm" onClick={() => setShowFiles((v) => !v)}>
-                      <FolderOpen /> Agent files ({files.length})
-                    </Button>
-                  )}
-                </div>
-              )}
-              {showFiles &&
-                files.map(([path, f]) => (
-                  <div key={path} className="rounded-xl border bg-card p-4">
-                    <div className="mb-2 font-mono text-xs text-muted-foreground">{path}</div>
-                    <pre className="text-sm whitespace-pre-wrap">{f.content}</pre>
-                  </div>
-                ))}
             </div>
+
+            <div className="relative">
+              {globeCities.length > 0 && <Globe cities={globeCities} selected={cityId} onSelect={setCityId} className="mx-auto aspect-square w-full max-w-[600px]" />}
+              <div className="mt-2 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
+                <MousePointerClick className="size-3.5" /> Drag to spin · tap a city to choose it
+              </div>
+            </div>
+          </div>
+
+          {trips.length > 0 && (
+            <section className="relative mx-auto max-w-6xl px-4 pb-12">
+              <h2 className="mb-3 font-display text-xl font-semibold">Your trips</h2>
+              <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                {trips.map((t) => (
+                  <TripChip key={t.id} t={t} onOpen={() => select(t.id)} onDelete={() => remove(t.id)} />
+                ))}
+              </div>
+            </section>
           )}
         </main>
+      ) : (
+        /* ------------------------------------------------------------- Trip */
+        <div className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_400px]">
+          <main className="lg:min-h-0 lg:overflow-y-auto">
+            {!detail || !trip ? (
+              <div className="mx-auto max-w-4xl space-y-4 p-6">
+                <Skeleton className="h-40 rounded-3xl" />
+                <Skeleton className="h-80 rounded-3xl" />
+              </div>
+            ) : (
+              <div className="mx-auto max-w-4xl space-y-5 p-4 lg:p-6">
+                <button type="button" onClick={() => select(null)} disabled={busy} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+                  <ArrowLeft className="size-4" /> All destinations
+                </button>
 
-        {/* Right: agent */}
-        <aside className="flex h-[85dvh] flex-col border-t bg-card/40 lg:h-auto lg:min-h-0 lg:border-t-0 lg:border-l">
-          {selected && detail ? (
-            <AgentPanel
-              key={selected}
-              ref={onPanelReady}
-              tripId={selected}
-              title={trip?.title ?? ""}
-              suggestions={
-                detail.check
-                  ? ["Make it more relaxed", "Cheaper please", "Add more art", "Pack in more"]
-                  : ["Plan this trip."]
-              }
-              transcript={detail.transcript}
-              initialTodos={detail.todos}
-              onFiles={() => {}}
-              onSaved={refresh}
-              onBusy={setBusy}
-            />
-          ) : (
-            <div className="flex h-full flex-col items-center justify-center p-8 text-center text-sm text-muted-foreground">
-              <Sparkles className="mb-2 size-5 text-primary" />
-              Your planning agent appears here once you start a trip. You&apos;ll see each step it takes, from shortlisting
-              places to checking hours and budget.
-            </div>
-          )}
-        </aside>
-      </div>
+                <div className={cn("relative overflow-hidden rounded-3xl bg-gradient-to-br p-6 text-white shadow-md", CITY_STYLE[trip.city_id]?.gradient)}>
+                  <div className="absolute -top-6 -right-2 text-[9rem] leading-none opacity-20 select-none">{CITY_STYLE[trip.city_id]?.emoji}</div>
+                  <div className="relative">
+                    <div className="flex items-center gap-1.5 text-sm opacity-90">
+                      <CalendarDays className="size-4" /> {fmtRange(trip)} · {detail.city.name}, {detail.city.country}
+                    </div>
+                    <h1 className="mt-1 font-display text-3xl font-semibold drop-shadow-sm sm:text-4xl">
+                      {trip.status === "planned" ? trip.title : `${trip.days_count} day${trip.days_count > 1 ? "s" : ""} in ${detail.city.name}`}
+                    </h1>
+                    {trip.summary && <p className="mt-2 max-w-2xl text-sm opacity-95">{trip.summary}</p>}
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {[trip.pace, `$${trip.budget} budget`, ...trip.interests].map((x) => (
+                        <span key={x} className="rounded-full bg-white/25 px-2.5 py-0.5 text-xs capitalize backdrop-blur">
+                          {x}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {detail.check && !busy ? (
+                  <>
+                    <ItineraryView trip={trip} city={detail.city} check={detail.check} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button variant="outline" size="sm" onClick={() => panel.current?.send("Re-plan this trip from scratch.")}>
+                        <RefreshCw /> Re-plan from scratch
+                      </Button>
+                      {files.length > 0 && (
+                        <Button variant="ghost" size="sm" onClick={() => setShowFiles((v) => !v)}>
+                          <FolderOpen /> Checklist & agent files
+                        </Button>
+                      )}
+                    </div>
+                    {showFiles &&
+                      files.map(([path, f]) => (
+                        <div key={path} className="rounded-2xl border bg-card p-4">
+                          <div className="mb-2 font-mono text-xs text-muted-foreground">{path}</div>
+                          <pre className="text-sm whitespace-pre-wrap">{f.content}</pre>
+                        </div>
+                      ))}
+                  </>
+                ) : (
+                  <PlanningProgress todos={todos} busy={busy} city={detail.city} onStart={() => panel.current?.send("Plan this trip.")} />
+                )}
+              </div>
+            )}
+          </main>
+
+          <aside className="flex h-[80dvh] flex-col border-t bg-card/50 lg:h-auto lg:min-h-0 lg:border-t-0 lg:border-l">
+            {detail ? (
+              <AgentPanel
+                key={selected}
+                ref={onPanelReady}
+                tripId={selected}
+                title={trip?.status === "planned" ? "Ask for changes any time" : "Planning your trip"}
+                suggestions={detail.check ? ["Make it more relaxed", "Cheaper please", "Add more art", "Pack in more"] : ["Plan this trip."]}
+                transcript={detail.transcript}
+                initialTodos={detail.todos}
+                onTodos={setTodos}
+                onFiles={() => {}}
+                onSaved={refresh}
+                onBusy={setBusy}
+              />
+            ) : (
+              <Skeleton className="m-4 h-full" />
+            )}
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

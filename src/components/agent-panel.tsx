@@ -3,7 +3,7 @@
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Bot, CheckCircle2, Circle, Loader2, Sparkles } from "lucide-react";
+import { ArrowUp, Bot, CheckCircle2, ChevronDown, Circle, Loader2, Sparkles } from "lucide-react";
 
 import { ToolStep, type Step } from "@/components/tool-step";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,31 @@ function Markdown({ text }: { text: string }) {
   return (
     <div className="space-y-2 text-sm leading-relaxed [&_li]:ml-4 [&_ol]:list-decimal [&_strong]:font-semibold [&_table]:text-xs [&_td]:border [&_td]:px-1.5 [&_th]:border [&_th]:px-1.5 [&_ul]:list-disc">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  );
+}
+
+/** Steps collapsed to one live line ("Checking itinerary…"); expand to audit every tool call. */
+function StepGroup({ steps, live }: { steps: Step[]; live: boolean }) {
+  const [open, setOpen] = useState(false);
+  const visible = steps.filter((s) => s.name !== "write_todos");
+  const last = visible.at(-1) ?? steps.at(-1)!;
+  const warn = visible.filter((s) => s.result && /"ok": false|"saved": false|"clean": false/.test(s.result)).length;
+  return (
+    <div className="space-y-1">
+      {open ? (
+        steps.map((s) => <ToolStep key={s.id} step={s} />)
+      ) : (
+        <ToolStep key={last.id} step={last} />
+      )}
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 px-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+      >
+        <ChevronDown className={cn("size-3 transition-transform", open && "rotate-180")} />
+        {open ? "Hide steps" : `${live ? "Working · " : ""}${visible.length} steps${warn ? ` · ${warn} self-corrected` : ""} — show all`}
+      </button>
     </div>
   );
 }
@@ -229,13 +254,7 @@ export function AgentPanel({
             </div>
           ) : (
             <div key={i} className="space-y-2">
-              {it.steps.length > 0 && (
-                <div className="space-y-1">
-                  {it.steps.map((s) => (
-                    <ToolStep key={s.id} step={s} />
-                  ))}
-                </div>
-              )}
+              {it.steps.length > 0 && <StepGroup steps={it.steps} live={busy && i === items.length - 1} />}
               {it.text && <Markdown text={it.text} />}
               {it.error && (
                 <div className="rounded-md border border-red-300 bg-red-50 p-2 text-xs text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
