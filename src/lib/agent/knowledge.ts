@@ -1,4 +1,4 @@
-import { HAZARDS, RULES } from "./triage";
+import { DINNER, LUNCH, PACE_LIMITS } from "./itinerary";
 
 /**
  * Domain knowledge, packaged as Deep Agent skills (SKILL.md files with YAML
@@ -7,89 +7,99 @@ import { HAZARDS, RULES } from "./triage";
  * (progressive disclosure), so the base prompt stays small.
  */
 
-const ruleTable = HAZARDS.map((h) => `| ${h} | ${RULES[h].urgency} | ${RULES[h].hours}h | ${RULES[h].trade ?? "(your call)"} |`).join("\n");
+const paceTable = Object.entries(PACE_LIMITS)
+  .map(([pace, l]) => `| ${pace} | ${l.stops} | ${l.walking} min | ${l.end} |`)
+  .join("\n");
 
 export const SKILLS: Record<string, string> = {
-  "/skills/maintenance-triage/SKILL.md": `---
-name: maintenance-triage
-description: How to triage a tenant maintenance request — hazard definitions, the urgency rule table, what to ask when a message is vague, and how to split multi-issue messages. Read before classifying any request.
+  "/skills/itinerary-design/SKILL.md": `---
+name: itinerary-design
+description: How to design a good day-by-day city itinerary — clustering by neighbourhood, timing around opening hours, meals, pacing and budget. Read before drafting any plan.
 ---
-# Maintenance triage
+# Itinerary design
 
-## Principles
-1. **Life safety first, then protecting the property, then convenience.**
-2. **When in doubt, triage up.** It's cheaper to send a plumber for a contained
-   leak than to explain mould damage to an insurer.
-3. **Split multi-issue messages.** "Dishwasher won't drain, and the closet door
-   came off its track" is two work orders with different urgencies and trades.
-4. **Quote, don't infer.** Every hazard needs a verbatim quote from the tenant.
-   If the message is too vague ("something is wrong with the fridge"), use
-   \`unclear\` and ask follow-up questions instead of guessing.
+## The shape of a good day
+1. **One or two neighbourhoods per day.** Cluster stops geographically; long
+   cross-town hops waste the day. check_itinerary shows each leg (walk vs transit).
+2. **Anchor the day** on the one stop that has the tightest constraint (timed
+   tickets, early closing, closed weekdays), then fill around it.
+3. **Morning for the big sights**, before crowds and heat. Viewpoints at sunset.
+   Nightlife after dinner.
+4. **Meals are stops.** Lunch must start between ${LUNCH[0]} and ${LUNCH[1]}, dinner
+   between ${DINNER[0]} and ${DINNER[1]}. Pick food places that serve that meal and are
+   near the surrounding stops.
+5. **Theme each day** in a few words ("Ancient Rome", "Temples of Higashiyama").
 
-## Rule table (applied by classify_urgency — never by you)
-| hazard | urgency | respond within | trade |
+## Pace limits (enforced by check_itinerary)
+| pace | max stops/day | walking | day ends by |
 |---|---|---|---|
-${ruleTable}
+${paceTable}
 
-No heat with an indoor temperature below 55°F becomes an emergency (4h).
-A keyword safety net escalates gas, CO, fire, sparking, flooding and sewage
-mentions automatically, even if you didn't flag them.
+## Budget
+- Budget is per person for the whole trip, in USD: entry fees + food + transit hops.
+- If over budget, swap a pricey dinner for a cheaper one, or a paid museum for a
+  free viewpoint/park that still matches the interests. Don't drop meals.
 
-## Hazard hints
-- **active_water_leak**: water still flowing or spreading. A drip into a bucket is \`minor_leak_or_drip\`.
-- **electrical_sparking_or_burning**: sparks, burning or melting smell, scorch marks, warm outlets.
-- **appliance_failure**: fridge not cooling, dishwasher not draining, oven dead. Not a safety issue unless water or gas is involved.
-- **minor_repair**: doors, drawers, blinds, cabinet hinges, cosmetic damage.
+## Interests
+At least half of the non-food stops should match the traveller's interests.
+Mix in one "wildcard" highlight per trip if it's iconic.
 
-## Follow-up questions for vague messages (pick 1–3, plain language)
-- Fridge: "Is it still cold inside? Is the light on? Any water on the floor?"
-- Leak: "Is water still coming out right now? Where exactly?"
-- Heat: "What does the thermostat read? Is the furnace making any noise?"
-- Always: "Could you send a photo?"
-
-## Repeat issues
-If the unit history shows the same failure 2+ times in 90 days, or the
-equipment is past its typical life (furnace ~15–20 yrs, water heater ~10–12,
-fridge ~12–15), say so to the owner and suggest asking the vendor for a
-replacement quote in the scope.
+## Workflow
+Draft → check_itinerary → fix every problem → check again → save_itinerary.
+Never hand-wave hours or walking times; the checker computes them.
 `,
 
-  "/skills/tenant-communication/SKILL.md": `---
-name: tenant-communication
-description: How to write the tenant reply and the vendor dispatch message — tone, structure, legal do's and don'ts (liability, rent credits, entry notice, Fair Housing). Read before drafting any message.
+  "/skills/city-lisbon/SKILL.md": `---
+name: city-lisbon
+description: Local knowledge for Lisbon — neighbourhood clusters, Monday closures, hills and trams, fado, food tips. Read when planning Lisbon.
 ---
-# Tenant & vendor communication
+# Lisbon local guide
+- **Clusters:** Belém (Tower, Jerónimos, MAAT, Pastéis de Belém) is a half day out west.
+  Alfama/Graça (castle, Sé, miradouros, flea market) pair well. Baixa/Chiado/Bairro Alto
+  are central and walkable. The Oceanarium (Parque das Nações) is a trip east of its own.
+- **Closures:** Belém Tower, Jerónimos and the Tile Museum close on **Mondays**. MAAT and the
+  Gulbenkian close on **Tuesdays**. Feira da Ladra is **Tuesdays and Saturdays only**.
+- **Hills:** Lisbon is steep. On a relaxed pace, keep Alfama + Graça uphill segments short;
+  tram 28 or a tuk-tuk helps.
+- **Food:** custard tarts at Pastéis de Belém (go early); Time Out Market is the easy lunch;
+  Cervejaria Ramiro for seafood (closed Mondays); a bifana at O Trevo is the budget classic.
+- **Evening:** sunset at Senhora do Monte, then fado in Bairro Alto.
+- Tip: the Viva Viagem card covers metro, trams and the Santa Justa lift.
+`,
 
-## Tenant reply (SMS-length, 40–120 words)
-1. **Emergencies: safety steps first**, numbered, in the tenant's own terms
-   (use the exact shutoff locations from the unit record).
-2. Acknowledge the problem in one sentence. Calm and specific, never alarmist.
-3. What happens next and the response window ("A plumber is being dispatched;
-   we're aiming to have someone there within 2 hours.").
-4. Entry: for non-emergencies, propose a window or ask for availability. Most
-   US states require 24–48h notice before non-emergency entry. Mention pets
-   or access notes if relevant.
-5. Sign as "— {owner contact}, {company}".
+  "/skills/city-rome/SKILL.md": `---
+name: city-rome
+description: Local knowledge for Rome — clusters, Vatican Sunday closure, booking rules, trattoria and aperitivo tips. Read when planning Rome.
+---
+# Rome local guide
+- **Clusters:** Ancient Rome (Colosseum, Forum/Palatine, Capitoline) is one morning.
+  Centro Storico (Pantheon, Navona, Campo de' Fiori, Trevi, Spanish Steps) is a walking day.
+  Vatican (Museums + St. Peter's) is a full morning across the river. Trastevere is for
+  evenings (Gianicolo sunset, dinner, aperitivo).
+- **Closures:** the Vatican Museums close on **Sundays**. The Borghese Gallery closes **Mondays**
+  and needs a reservation. Campo de' Fiori market is mornings only and closed Sundays.
+- **Tickets:** the Colosseum ticket includes the Forum & Palatine; book timed entry ahead.
+- **Food:** carbonara at Roscioli or Da Enzo (both busy, so book); Testaccio market for a cheap
+  local lunch; Ai Marmi pizza for a budget dinner (closed Wednesdays); gelato at Giolitti.
+- **Dress code:** shoulders and knees covered for St. Peter's.
+`,
 
-## Never
-- Admit fault or promise to pay for damage ("we'll reimburse you"). Say the
-  owner will review any damage.
-- Promise rent credits or refunds; that's the owner's decision.
-- Guarantee a fix or arrival time. Give the target window instead.
-- Blame the tenant or speculate about cause.
-- Mention protected characteristics (Fair Housing Act: race, colour, religion,
-  sex, national origin, familial status, disability).
-
-## Vendor dispatch message
-- Address, unit, access notes (lockbox, pets, best times), and tenant first
-  name + phone for scheduling. **No tenant email or other personal details.**
-- Urgency and respond-by window.
-- Scope: symptoms observed, what to check (e.g. the ceiling of the unit below
-  after a leak), and the not-to-exceed amount = the owner's approval limit
-  ("call before exceeding $400").
-- Ask them to reply with an ETA and send before/after photos.
-
-Run **check_message** on every draft before saving.
+  "/skills/city-kyoto/SKILL.md": `---
+name: city-kyoto
+description: Local knowledge for Kyoto — east/west clusters, early temple closing times, crowds, Gion etiquette, food tips. Read when planning Kyoto.
+---
+# Kyoto local guide
+- **Clusters:** Higashiyama (Kiyomizu-dera, Sannenzaka, National Museum) flows into Gion in the
+  evening. Northern Higashiyama: Ginkaku-ji → Philosopher's Path. Arashiyama (Bamboo Grove,
+  Tenryū-ji) is far west, a half day. Fushimi Inari is south; go early. Kinkaku-ji is northwest.
+- **Temples close early:** most close 16:00–17:00. Put temples in the morning/early afternoon
+  and save Gion, Pontochō and shows for the evening.
+- **Closures:** Nijō Castle closes **Tuesdays**; Kyoto National Museum and the Imperial Palace
+  close **Mondays**; Ramen Sen no Kaze closes Mondays; Gion Karyo closes Wednesdays.
+- **Food:** Nishiki Market for a grazing lunch (stalls wind down ~17:30); ramen for a quick
+  dinner; Pontochō for riverside dining; kaiseki at Karyo is a splurge (~$90).
+- **Etiquette:** don't photograph maiko up close in Gion; remove shoes where asked.
+- Tip: buses are slow at rush hour; the subway + walking is often faster.
 `,
 };
 
@@ -100,36 +110,33 @@ export function skillFiles(): Record<string, { content: string; mimeType: string
   );
 }
 
-export const SYSTEM_PROMPT = `You are FixDesk, the maintenance coordinator for a small residential landlord. You turn tenant maintenance requests into safe, well-scoped work orders with drafted messages, and you answer the owner's questions about open maintenance.
+export const SYSTEM_PROMPT = `You are Wayfarer, a trip-planning agent. You turn a trip request (city, dates, budget, interests, pace) into a feasible, well-paced day-by-day itinerary, then refine it with the traveller.
 
-## Standard workflow: "triage <request>"
-1. Plan with write_todos (keep it to the steps below).
-2. get_request. Read the maintenance-triage skill if you haven't in this thread.
-3. Delegate to the **history-analyst** subagent (task tool) with the unit_id and the issue. It reports repeat failures and old equipment.
-4. Split the message into distinct issues. For EACH issue, call **classify_urgency** with verbatim evidence. If it reports problems, fix them and call again. Never decide urgency yourself.
-5. For each issue that isn't waiting on tenant answers, call **find_vendors** with the classified trade and urgency, and pick one (usually the top-ranked).
-6. Read the tenant-communication skill. Draft the tenant reply (safety steps first for emergencies) and the vendor dispatch message. Run **check_message** on both and fix any flags.
-7. Call **create_work_order** once per issue. If it refuses, fix what it says and retry.
-8. Write a short note to the owner at /workspace/<request_id>/owner-note.md: what happened, urgency, vendor, cost, approval needed, and any repeat-issue recommendation.
-9. Reply to the owner in 3–5 lines: urgency and why, who you'd dispatch and the estimate, whether approval is needed, and anything they should know (e.g. "third no-heat call in 60 days; asked the vendor for a replacement quote"). The UI shows the full work order, so don't repeat it.
+## Standard workflow: "plan this trip"
+1. Plan your work with write_todos.
+2. get_trip. Read the itinerary-design skill and the city's skill (e.g. city-lisbon).
+3. Delegate to the **local-expert** subagent (task tool) with the city_id, interests, dates and pace. It returns a shortlist grouped by neighbourhood, with meal spots.
+4. Use search_places if you need more detail (hours, meals, cost).
+5. Draft the days: cluster by neighbourhood, respect closed weekdays and opening hours, include lunch and dinner, stay within pace and budget.
+6. Call **check_itinerary**. Fix every problem it reports and check again. Never estimate times or costs yourself.
+7. Call **save_itinerary** with a title, a 2–3 sentence summary and practical tips.
+8. Write a short packing/booking checklist to /workspace/<trip_id>/checklist.md.
+9. Reply in 3–5 lines: the shape of each day, total cost vs budget, and anything to book ahead. The UI shows the full itinerary and map.
 
-## Other requests
-- "What's urgent today?" or other portfolio questions → list_open_work_orders.
-- Edits ("make the tenant text shorter", "use the other plumber") → revise, check_message, then create_work_order with the existing work_order_id.
+## Refinements ("make day 2 more relaxed", "cheaper dinners", "add more art")
+Change only what was asked, check_itinerary, then save_itinerary again (pass pace/budget/interests only if the traveller changed them).
 
 ## Rules
-- Safety beats cost. Emergencies are dispatched without waiting for approval; the owner is told.
-- Evidence over assumption. Vague message → hazard "unclear" + follow-up questions, not a guess.
-- You draft; the owner sends. Never say a message was sent or a vendor confirmed.
-- Be concise. Owners read this on their phone.`;
+- Feasibility beats ambition. If it doesn't fit, cut it and say so.
+- Use only places from search_places; never invent venues.
+- Be concise and warm.`;
 
-export const HISTORY_ANALYST_PROMPT = `You are a maintenance history analyst for a small rental portfolio.
+export const LOCAL_EXPERT_PROMPT = `You are a local expert for one city.
 
-Given a unit_id and a short issue description:
-1. Call get_unit_history.
-2. Report, in at most 5 bullets:
-   - prior work orders for the same or related issue (date, what was done, cost),
-   - whether this is a repeat failure (same issue 2+ times in ~90 days),
-   - age of the relevant equipment vs typical lifespan (furnace 15–20y, water heater 10–12y, fridge 12–15y, dishwasher 9–12y, electrical panel 25–40y),
-   - a one-line recommendation (e.g. "ask the HVAC vendor for a replacement quote").
-If there's nothing relevant, say "No relevant history." Nothing else.`;
+Given a city_id, interests, dates and pace:
+1. Call search_places (with the interests) once for sights and once with category "food".
+2. Return a compact shortlist grouped by neighbourhood:
+   - for each neighbourhood: 2–4 sights that match the interests (id, name, why), and 1–2 food places with the meals they serve,
+   - flag places closed on any of the trip dates' weekdays,
+   - one line suggesting which neighbourhoods pair well on the same day.
+Use place ids exactly as returned. Nothing else.`;

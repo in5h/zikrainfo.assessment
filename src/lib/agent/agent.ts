@@ -4,46 +4,53 @@ import type { BaseChatModel } from "@langchain/core/language_models/chat_models"
 import { createDeepAgent } from "deepagents";
 import { todoListMiddleware } from "langchain";
 
-import { HISTORY_ANALYST_PROMPT, SYSTEM_PROMPT } from "./knowledge";
-import { allTools, historyTools } from "./tools";
+import { LOCAL_EXPERT_PROMPT, SYSTEM_PROMPT } from "./knowledge";
+import { OfflinePlannerModel } from "./offline-model";
+import { allTools, expertTools } from "./tools";
 
 export const MAIN_MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 export const SUBAGENT_MODEL = process.env.ANTHROPIC_SUBAGENT_MODEL || "claude-sonnet-5-5";
 
-function anthropic(model: string, effort: "low" | "medium" | "high") {
+export function anthropic(model: string, effort: "low" | "medium" | "high", apiKey: string) {
   // Current Claude models reject sampling params (temperature/top_p) and run
   // adaptive thinking by default; effort is the quality/cost dial.
-  return new ChatAnthropic({ model, maxTokens: 16000, outputConfig: { effort } });
+  return new ChatAnthropic({ model, apiKey, maxTokens: 16000, outputConfig: { effort } });
+}
+
+/** Server key wins; otherwise a key the user pasted into the app (sent per request, never stored server-side). */
+export function resolveApiKey(fromRequest?: string | null) {
+  return process.env.ANTHROPIC_API_KEY || fromRequest?.trim() || null;
 }
 
 /**
  * The harness: a LangGraph Deep Agent with
  *  - planning (write_todos) and a virtual filesystem,
- *  - domain skills loaded from /skills/ (progressive disclosure),
- *  - seven custom property-management tools (request lookup, unit history,
- *    deterministic urgency rules with a safety net, vendor ranking + estimates,
- *    message lint, validated work-order creation, portfolio view),
- *  - an isolated-context "history-analyst" subagent.
+ *  - domain skills loaded from /skills/ (itinerary design + per-city guides),
+ *  - five custom travel tools (trip request, place search, deterministic
+ *    itinerary checker, validated save, saved trips),
+ *  - an isolated-context "local-expert" subagent.
  */
-export function buildAgent(opts: { model?: BaseChatModel; subagentModel?: BaseChatModel } = {}) {
-  const model = opts.model ?? anthropic(MAIN_MODEL, "medium");
-  const subagentModel = opts.subagentModel ?? opts.model ?? anthropic(SUBAGENT_MODEL, "low");
+export function buildAgent(opts: { model?: BaseChatModel; subagentModel?: BaseChatModel; apiKey?: string | null } = {}) {
+  // No key → demo mode: the same harness driven by a deterministic offline model.
+  const offline = !opts.model && !opts.apiKey ? new OfflinePlannerModel({}) : null;
+  const model = opts.model ?? offline ?? anthropic(MAIN_MODEL, "medium", opts.apiKey!);
+  const subagentModel = opts.subagentModel ?? opts.model ?? offline ?? anthropic(SUBAGENT_MODEL, "low", opts.apiKey!);
 
   return createDeepAgent({
-    name: "fixdesk",
+    name: "wayfarer",
     model,
     tools: allTools,
     systemPrompt: SYSTEM_PROMPT,
     skills: ["/skills/"],
-    // Planning is opt-in in deepagents ≥1.14; the triage workflow relies on it.
+    // Planning is opt-in in deepagents ≥1.14; the planning workflow relies on it.
     middleware: [todoListMiddleware()],
     subagents: [
       {
-        name: "history-analyst",
+        name: "local-expert",
         description:
-          "Reviews a unit's past work orders and equipment ages in an isolated context and reports repeat failures and end-of-life equipment. Use for every new triage. Input must include unit_id and the issue.",
-        systemPrompt: HISTORY_ANALYST_PROMPT,
-        tools: historyTools,
+          "Knows one city's catalog. In an isolated context it searches places for the traveller's interests and returns a shortlist grouped by neighbourhood, with meal spots and closed-day warnings. Input must include city_id, interests, dates and pace.",
+        systemPrompt: LOCAL_EXPERT_PROMPT,
+        tools: expertTools,
         model: subagentModel,
       },
     ],

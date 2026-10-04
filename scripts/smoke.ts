@@ -1,56 +1,14 @@
 /**
- * Offline end-to-end harness test: runs a full "triage the kitchen leak" turn
- * through the real Deep Agent graph, real tools and repo (in-memory), with a
- * scripted model standing in for Claude. Then unit-checks the rules engine.
+ * Offline end-to-end harness test (no API key needed). Runs real planning turns
+ * through the Deep Agent graph, tools, subagent and repo (in-memory) using the
+ * demo-mode offline planner, then unit-checks the itinerary rules.
  * Run: npm run smoke
  */
-import { AIMessage } from "@langchain/core/messages";
-
-import { runTurn } from "../src/lib/agent/run";
-import { classify, lintMessage, missingSafety, needsApproval, rankVendors } from "../src/lib/agent/triage";
+import { checkTrip } from "../src/lib/agent/itinerary";
+import { runTurn, type AgentEvent } from "../src/lib/agent/run";
 import { getRepo } from "../src/lib/data/repo";
-import { LANDLORD, seedUnits, seedVendors } from "../src/lib/data/seed";
-import { ScriptedChatModel } from "./scripted-model";
-
-const R = "req-leak-2b";
-const tc = (name: string, args: Record<string, unknown>) => ({
-  id: `call_${name}_${Math.random().toString(36).slice(2, 8)}`,
-  name,
-  args,
-  type: "tool_call" as const,
-});
-
-// The model under-calls it as a drip; the safety net must escalate.
-const issue = {
-  summary: "Kitchen sink leak",
-  trade: "plumbing",
-  hazards: ["minor_leak_or_drip"],
-  evidence: ["water coming out from under the kitchen sink", "it's spreading across the floor"],
-  indoor_temp_f: null,
-};
-const goodTenant =
-  "Diego, please shut off the water now: valves under the kitchen sink (left = hot, right = cold). Keep cords away from the water and move valuables off the floor. A plumber is being dispatched and we're aiming for someone there within 2 hours. — Sam, Maple & Pine Rentals";
-const vendorMsg =
-  "EMERGENCY: active leak under kitchen sink at 118 Maple Ct, Unit 2B. Tenant Diego, 555-0104. Respond within 2h. Also check the ceiling of unit 1B below. Call before exceeding $400. Reply with ETA.";
-
-const main = new ScriptedChatModel([
-  new AIMessage({ content: "", tool_calls: [tc("write_todos", { todos: [{ content: "Read request", status: "in_progress" }, { content: "Classify + vendor", status: "pending" }, { content: "Draft + save", status: "pending" }] })] }),
-  new AIMessage({ content: "", tool_calls: [tc("get_request", { request_id: R }), tc("read_file", { file_path: "/skills/maintenance-triage/SKILL.md" })] }),
-  new AIMessage({ content: "", tool_calls: [tc("task", { description: "unit_id=maple-2b issue: kitchen sink leak", subagent_type: "history-analyst" })] }),
-  new AIMessage({ content: "", tool_calls: [tc("classify_urgency", { request_id: R, issue: { ...issue, evidence: ["the pipe burst"] } })] }),
-  new AIMessage({ content: "", tool_calls: [tc("classify_urgency", { request_id: R, issue })] }),
-  new AIMessage({ content: "", tool_calls: [tc("find_vendors", { request_id: R, trade: "plumbing", urgency: "emergency" })] }),
-  new AIMessage({ content: "", tool_calls: [tc("check_message", { request_id: R, audience: "tenant", text: "So sorry! We'll reimburse you for any damage and guarantee it's fixed tonight." })] }),
-  new AIMessage({ content: "", tool_calls: [tc("create_work_order", { request_id: R, work_order_id: null, issue, vendor_id: "v-rapid-rooter", scope: "Stop leak", followup_questions: [], tenant_message: "A plumber is on the way.", vendor_message: vendorMsg })] }),
-  new AIMessage({ content: "", tool_calls: [tc("create_work_order", { request_id: R, work_order_id: null, issue, vendor_id: "v-rapid-rooter", scope: "Stop the leak under the kitchen sink; inspect supply lines; check 1B ceiling.", followup_questions: [], tenant_message: goodTenant, vendor_message: vendorMsg })] }),
-  new AIMessage({ content: "", tool_calls: [tc("write_file", { file_path: `/workspace/${R}/owner-note.md`, content: "# Owner note\nEmergency leak, Rapid Rooter dispatched." })] }),
-  new AIMessage("**Emergency**: active leak (safety net caught it). Rapid Rooter, est. $431–$713, no approval needed for emergencies. Check 1B's ceiling."),
-]);
-
-const sub = new ScriptedChatModel([
-  new AIMessage({ content: "", tool_calls: [tc("get_unit_history", { unit_id: "maple-2b" })] }),
-  new AIMessage("No relevant history."),
-]);
+import { CITIES } from "../src/lib/data/seed";
+import type { Interest, Pace, Trip } from "../src/lib/data/types";
 
 let failed = false;
 const assert = (cond: unknown, msg: string) => {
@@ -58,71 +16,125 @@ const assert = (cond: unknown, msg: string) => {
   if (!cond) failed = true;
 };
 
+async function newTrip(city_id: string, start_date: string, days_count: number, budget: number, interests: Interest[], pace: Pace) {
+  const now = new Date().toISOString();
+  const trip: Trip = {
+    id: `trip-${city_id}-${pace}-${days_count}-${Math.random().toString(36).slice(2, 6)}`,
+    city_id,
+    title: "",
+    start_date,
+    days_count,
+    budget,
+    interests,
+    pace,
+    notes: "",
+    status: "draft",
+    days: [],
+    summary: "",
+    tips: [],
+    total_cost: 0,
+    created_at: now,
+    updated_at: now,
+  };
+  return getRepo().saveTrip(trip);
+}
+
+async function turn(tripId: string, message: string) {
+  const events: AgentEvent[] = [];
+  for await (const e of runTurn({ threadId: `t-${tripId}`, tripId, message, apiKey: null })) events.push(e);
+  return events;
+}
+
+const results = (events: AgentEvent[], name: string) =>
+  events.filter((e): e is Extract<AgentEvent, { type: "tool_result" }> => e.type === "tool_result" && e.name === name);
+
+async function recheck(trip: Trip) {
+  const repo = getRepo();
+  const city = (await repo.getCity(trip.city_id))!;
+  return checkTrip({ ...trip, city, days: trip.days }, await repo.listPlaces(trip.city_id));
+}
+
 async function run() {
-  const events: { type: string; [k: string]: unknown }[] = [];
-  const threadId = `t-${R}`;
-  for await (const e of runTurn({ threadId, requestId: R, message: "Triage this request.", model: main, subagentModel: sub })) {
-    events.push(e);
-    if (e.type !== "token") console.log(JSON.stringify(e).slice(0, 200));
-  }
+  const repo = getRepo();
+
+  // ---- 1. Full plan: Lisbon starting on a Monday (Belém sights are closed Mondays)
+  const lis = await newTrip("lisbon", "2026-10-12", 2, 250, ["history", "food", "views"], "balanced");
+  const ev = await turn(lis.id, "Plan this trip.");
+  for (const e of ev) if (e.type !== "token") console.log("  ", JSON.stringify(e).slice(0, 160));
   console.log();
 
-  type Res = { name: string; content: string; subagent: boolean };
-  const results = events.filter((e) => e.type === "tool_result") as unknown as Res[];
-  const of = (name: string) => results.filter((r) => r.name === name);
+  assert(ev.some((e) => e.type === "todos"), "plan (todos) streamed");
+  assert(results(ev, "read_file").length >= 2, "itinerary + city skills read");
+  assert(results(ev, "task").length === 1 && ev.some((e) => e.type === "tool_result" && e.subagent), "local-expert subagent ran");
+  assert(results(ev, "check_itinerary").length >= 1, "draft validated with check_itinerary");
+  assert(results(ev, "save_itinerary")[0]?.content.includes('"saved": true'), "itinerary saved");
+  assert(ev.some((e) => e.type === "trip_saved"), "trip_saved event");
+  assert(ev.some((e) => e.type === "token"), "final summary streamed");
 
-  assert(of("classify_urgency")[0]?.content.includes('"ok": false'), "fabricated evidence rejected by classify_urgency");
-  const cls = of("classify_urgency")[1]?.content ?? "";
-  assert(cls.includes('"urgency": "emergency"') && cls.includes("active_water_leak"), "safety net escalated 'drip' to emergency leak");
-  const vend = of("find_vendors")[0]?.content ?? "";
-  assert(vend.includes("v-rapid-rooter") && !vend.includes("v-budget-plumb"), "emergency vendor search excludes non-24/7 vendors");
-  assert(of("check_message")[0]?.content.includes('"clean": false'), "message lint flags liability + guarantee");
-  assert(of("create_work_order")[0]?.content.includes('"saved": false'), "work order refused without shut-off instructions");
-  assert(of("create_work_order")[1]?.content.includes('"saved": true'), "valid work order saved");
-  assert(results.some((r) => r.subagent), "subagent tool activity streamed");
-  assert(of("task").length === 1, "subagent result returned to main agent");
-  assert(events.some((e) => e.type === "todos"), "todos streamed");
-  assert(events.some((e) => e.type === "token"), "final answer text streamed");
-  assert(events.some((e) => e.type === "work_order_saved"), "work_order_saved event");
+  const saved = (await repo.getTrip(lis.id))!;
+  const c = await recheck(saved);
+  assert(saved.status === "planned" && saved.days.length === 2, "trip persisted as planned with 2 days");
+  assert(c.ok, `saved plan re-checks clean (${c.problems.join(" | ") || "no problems"})`);
+  assert(c.days.every((d) => d.has_lunch), "every day has lunch in the window");
+  assert(c.total_cost <= saved.budget, `within budget ($${c.total_cost} ≤ $${saved.budget})`);
+  const monday = saved.days[0].stops.map((s) => s.place_id);
+  assert(!monday.includes("lis-belem-tower") && !monday.includes("lis-jeronimos"), "Monday avoids Belém sights closed on Mondays");
+  const thread = await repo.getThread(`t-${lis.id}`);
+  assert(thread && Object.keys(thread.files).some((p) => p.endsWith("checklist.md")), "checklist written to agent workspace");
 
-  const repo = getRepo();
-  const [wo] = await repo.listWorkOrders({ request_id: R });
-  assert(wo && wo.urgency === "emergency" && wo.status === "ready" && !wo.needs_approval, `work order persisted (${wo?.urgency}, ${wo?.status}, $${wo?.estimate_low}–$${wo?.estimate_high})`);
-  assert(wo?.safety_steps.some((s) => s.includes("under the kitchen sink")), "safety steps use the unit's shutoff location");
-  assert((await repo.getRequest(R))?.status === "triaged", "request status → triaged");
-  const thread = await repo.getThread(threadId);
-  assert(thread && thread.messages.length > 10, `thread persisted (${thread?.messages.length} messages)`);
-  assert(thread && Object.keys(thread.files).some((p) => p.endsWith("owner-note.md")) && !Object.keys(thread.files).some((p) => p.startsWith("/skills/")), "workspace file persisted, skills excluded");
-  assert(main.seen[0].some((m) => JSON.stringify(m.content).includes("maintenance-triage")), "skills advertised in system prompt");
+  // ---- 2. Refinements
+  const ev2 = await turn(lis.id, "Can you make it more relaxed?");
+  const relaxed = (await repo.getTrip(lis.id))!;
+  assert(results(ev2, "save_itinerary")[0]?.content.includes('"saved": true') && relaxed.pace === "relaxed", "refine: more relaxed → pace saved as relaxed");
+  assert(relaxed.days.every((d) => d.stops.length <= 5), "relaxed days respect the 5-stop limit");
 
-  // ---- rules engine unit checks
-  const units = seedUnits();
-  const u = (id: string) => units.find((x) => x.id === id)!;
-  const gas = classify("I've been smelling something like rotten eggs near the stove", u("maple-1a"), { summary: "Stove", trade: "appliance", hazards: ["appliance_failure"], evidence: ["near the stove"] });
-  assert(gas.urgency === "emergency" && gas.trade === "gas" && gas.call_911_or_utility, "rotten-egg smell → gas emergency, gas trade, call utility");
-  const heat = (t: number) => classify("The thermostat says 58 degrees inside", u("pine-3c"), { summary: "No heat", trade: "hvac", hazards: ["no_heat"], evidence: ["thermostat says 58 degrees"], indoor_temp_f: t });
-  assert(heat(58).urgency === "urgent" && heat(58).respond_within_hours === 24, "no heat at 58°F → urgent 24h");
-  assert(heat(50).urgency === "emergency" && heat(50).respond_within_hours === 4, "no heat at 50°F → emergency 4h");
-  const vague = classify("something is wrong with the fridge", u("pine-4a"), { summary: "Fridge", trade: "appliance", hazards: ["unclear"], evidence: [] });
-  assert(vague.ok && vague.needs_followup, "vague message → follow-up questions required");
-  const ranked = rankVendors(seedVendors(), u("pine-3c"), "gas", "emergency");
-  assert(ranked.length > 0 && !ranked.some((v) => v.vendor_id === "v-northside-gas"), "vendors filtered by service area");
-  const drip = rankVendors(seedVendors(), u("maple-1b"), "plumbing", "routine", LANDLORD.approval_limit);
-  assert(drip[0]?.vendor_id === "v-budget-plumb" && drip[0].estimate_high <= LANDLORD.approval_limit, `routine job prefers a vendor within the approval limit (${drip[0]?.name})`);
-  assert(needsApproval(LANDLORD, "routine", 450) && !needsApproval(LANDLORD, "emergency", 900), "approval: routine over limit yes, emergency no");
-  assert(lintMessage("Keep everyone, including pets, away. We'll aim for 2 hours.", "tenant").length === 0, "lint: no false positives on normal safety text");
-  assert(lintMessage("Tenant email diego.r@example.com", "vendor", u("maple-2b")).some((f) => f.category === "privacy"), "lint: tenant email blocked in vendor message");
-  assert(missingSafety("A plumber is on the way", ["active_water_leak"]).length === 1, "missing shut-off instruction detected");
+  const before = relaxed.total_cost;
+  await turn(lis.id, "Cheaper please");
+  const cheaper = (await repo.getTrip(lis.id))!;
+  assert(cheaper.total_cost <= before, `refine: cheaper → $${before} → $${cheaper.total_cost}`);
 
-  if (process.env.SMOKE_DUMP) {
-    const fs = await import("node:fs");
-    fs.writeFileSync(`${process.env.SMOKE_DUMP}/events.ndjson`, events.map((e) => JSON.stringify(e)).join("\n") + "\n");
-    const req = await repo.getRequest(R);
-    fs.writeFileSync(
-      `${process.env.SMOKE_DUMP}/detail.json`,
-      JSON.stringify({ request: req, unit: await repo.getUnit(req!.unit_id), workOrders: await repo.listWorkOrders({ request_id: R }), transcript: [], files: thread?.files ?? {}, todos: thread?.todos ?? [] })
-    );
+  const ev3 = await turn(lis.id, "What's the weather like?");
+  assert(ev3.some((e) => e.type === "token" && /demo mode/i.test(e.text)), "unsupported question → helpful demo-mode reply");
+
+  // ---- 3. Every city × pace plans successfully
+  for (const city of CITIES) {
+    for (const [pace, days, budget] of [["relaxed", 1, 120], ["balanced", 3, 400], ["packed", 2, 300]] as const) {
+      const t = await newTrip(city.id, "2026-10-17", days, budget, ["history", "art", "food", "nature"], pace);
+      const e = await turn(t.id, "Plan this trip.");
+      const s = (await repo.getTrip(t.id))!;
+      const chk = s.days.length ? await recheck(s) : null;
+      assert(
+        results(e, "save_itinerary").some((r) => r.content.includes('"saved": true')) && chk?.ok,
+        `${city.name} ${pace} ${days}d $${budget} → saved, ${s.days.reduce((a, d) => a + d.stops.length, 0)} stops, $${s.total_cost}${chk && !chk.ok ? ` (${chk.problems[0]})` : ""}`
+      );
+    }
   }
+
+  // ---- 4. Rule checks
+  const rome = (await repo.getCity("rome"))!;
+  const romePlaces = await repo.listPlaces("rome");
+  const sundayVatican = checkTrip(
+    { city: rome, pace: "balanced", budget: 500, interests: ["art"], start_date: "2026-10-18", days_count: 1, days: [{ date: "2026-10-18", theme: "x", stops: [{ place_id: "rom-vatican-museums" }, { place_id: "rom-roscioli", start: "13:00" }] }] },
+    romePlaces
+  );
+  assert(sundayVatican.problems.some((p) => /closed on Sundays/.test(p)), "checker: Vatican Museums on a Sunday is rejected");
+  const noLunch = checkTrip(
+    { city: rome, pace: "balanced", budget: 500, interests: ["history"], start_date: "2026-10-19", days_count: 1, days: [{ date: "2026-10-19", theme: "x", stops: [{ place_id: "rom-colosseum" }, { place_id: "rom-forum" }] }] },
+    romePlaces
+  );
+  assert(noLunch.problems.some((p) => /no lunch/.test(p)), "checker: day without lunch is rejected");
+  const tooEarly = checkTrip(
+    { city: rome, pace: "balanced", budget: 500, interests: ["history"], start_date: "2026-10-19", days_count: 1, days: [{ date: "2026-10-19", theme: "x", stops: [{ place_id: "rom-colosseum", start: "09:00" }, { place_id: "rom-vatican-museums", start: "10:00" }] }] },
+    romePlaces
+  );
+  assert(tooEarly.problems.some((p) => /earliest arrival/.test(p)), "checker: impossible cross-town timing is rejected");
+  const legs = tooEarly.days[0].timeline[1].leg;
+  assert(legs?.mode === "transit", `checker: Colosseum → Vatican is a transit leg (${legs?.minutes} min)`);
+  const broke = checkTrip(
+    { city: rome, pace: "balanced", budget: 30, interests: ["food"], start_date: "2026-10-19", days_count: 1, days: [{ date: "2026-10-19", theme: "x", stops: [{ place_id: "rom-roscioli", start: "12:30" }] }] },
+    romePlaces
+  );
+  assert(broke.problems.some((p) => /over the \$30 budget/.test(p)), "checker: over-budget plan is rejected");
 
   if (failed) process.exit(1);
   console.log("\nAll smoke checks passed.");

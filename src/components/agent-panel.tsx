@@ -58,7 +58,7 @@ function Markdown({ text }: { text: string }) {
 
 export function AgentPanel({
   ref,
-  requestId,
+  tripId,
   title,
   suggestions,
   transcript,
@@ -70,7 +70,7 @@ export function AgentPanel({
   onBusy,
 }: {
   ref?: Ref<AgentPanelHandle>;
-  requestId: string | null;
+  tripId: string;
   title: string;
   suggestions: string[];
   transcript: TranscriptEntry[];
@@ -114,7 +114,7 @@ export function AgentPanel({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestId, message }),
+        body: JSON.stringify({ tripId, message }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -156,7 +156,7 @@ export function AgentPanel({
             case "files":
               onFiles?.(ev.files);
               break;
-            case "work_order_saved":
+            case "trip_saved":
               onSaved?.();
               break;
             case "error":
@@ -183,7 +183,7 @@ export function AgentPanel({
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <Bot className="size-4 text-primary" />
         <div className="min-w-0">
-          <div className="text-sm font-semibold">FixDesk agent</div>
+          <div className="text-sm font-semibold">Wayfarer agent</div>
           <div className="truncate text-xs text-muted-foreground">{title}</div>
         </div>
         {busy && <Loader2 className="ml-auto size-4 animate-spin text-muted-foreground" />}
@@ -218,9 +218,8 @@ export function AgentPanel({
         {items.length === 0 && (
           <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
             <Sparkles className="mb-2 size-4 text-primary" />
-            The agent plans, checks the unit&apos;s repair history with a subagent, classifies urgency against a fixed
-            safety rule table, ranks vendors, drafts the tenant and vendor messages, and saves a work order. Nothing
-            is sent until you click Send.
+            The agent plans its work, asks a local-expert subagent for a shortlist, drafts each day, and runs every
+            draft through a checker for opening hours, travel time, meals, pace and budget before saving it.
           </div>
         )}
         {items.map((it, i) =>
@@ -287,7 +286,7 @@ export function AgentPanel({
                 send(input);
               }
             }}
-            placeholder={requestId ? "Paste the tenant's reply, or ask for edits…" : "Ask about open maintenance…"}
+            placeholder="Ask for changes, e.g. “make day 2 more relaxed”…"
             className="max-h-32 min-h-10 resize-none"
             disabled={busy || Boolean(disabledReason)}
           />

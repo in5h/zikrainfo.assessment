@@ -10,13 +10,11 @@ import {
   ClipboardList,
   Database,
   FileText,
-  History,
+  MapPin,
   ListTodo,
   Loader2,
   Save,
   ShieldCheck,
-  Siren,
-  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -32,14 +30,12 @@ export type Step = {
 
 const META: Record<string, { label: string; icon: LucideIcon }> = {
   write_todos: { label: "Updated plan", icon: ListTodo },
-  get_request: { label: "Read request & unit", icon: ClipboardList },
-  get_unit_history: { label: "Read repair history", icon: History },
-  task: { label: "Delegated to history-analyst", icon: Bot },
-  classify_urgency: { label: "Classified urgency", icon: Siren },
-  find_vendors: { label: "Ranked vendors", icon: Wrench },
-  check_message: { label: "Checked message", icon: ShieldCheck },
-  create_work_order: { label: "Saved work order", icon: Save },
-  list_open_work_orders: { label: "Read open work orders", icon: Database },
+  get_trip: { label: "Read trip request", icon: ClipboardList },
+  search_places: { label: "Searched places", icon: MapPin },
+  task: { label: "Asked the local-expert", icon: Bot },
+  check_itinerary: { label: "Checked itinerary", icon: ShieldCheck },
+  save_itinerary: { label: "Saved itinerary", icon: Save },
+  list_trips: { label: "Read saved trips", icon: Database },
   read_file: { label: "Read file", icon: BookOpen },
   write_file: { label: "Wrote file", icon: FileText },
   edit_file: { label: "Edited file", icon: FileText },
@@ -61,27 +57,21 @@ function outcome(step: Step): { text: string; tone: "ok" | "warn" } | null {
   const r = parse(step.result);
   const args = (step.args ?? {}) as Record<string, unknown>;
   switch (step.name) {
-    case "classify_urgency": {
-      if (!r?.ok) return { text: `${(r?.problems as unknown[] | undefined)?.length ?? "?"} problem(s) — revising`, tone: "warn" };
-      const net = (r.escalated_by_safety_net as string[] | undefined)?.length ? " · safety net escalated" : "";
-      return { text: `${r.urgency} · ${r.respond_within_hours}h${net}`, tone: "ok" };
-    }
-    case "find_vendors": {
-      const v = (r?.vendors as { name: string }[] | undefined) ?? [];
-      return v.length ? { text: `${v.length} eligible · top: ${v[0].name}`, tone: "ok" } : { text: "none eligible", tone: "warn" };
-    }
-    case "check_message":
-      return r?.clean
-        ? { text: `${args.audience} message clean`, tone: "ok" }
-        : { text: `${(r?.flags as unknown[] | undefined)?.length ?? "?"} flag(s) — rewriting`, tone: "warn" };
-    case "create_work_order":
-      return r?.saved ? { text: `${r.urgency} · ${r.status}`, tone: "ok" } : { text: "refused — fixing", tone: "warn" };
+    case "search_places":
+      return Array.isArray(r) ? { text: `${(r as unknown[]).length} results${args.category ? ` · ${args.category}` : ""}`, tone: "ok" } : null;
+    case "check_itinerary":
+      if (!r) return { text: "invalid input", tone: "warn" };
+      return r.ok
+        ? { text: `feasible · $${r.total_cost} of $${r.budget}`, tone: "ok" }
+        : { text: `${(r.problems as unknown[]).length} problem(s) — revising`, tone: "warn" };
+    case "save_itinerary":
+      return r?.saved ? { text: `saved · $${r.total_cost}`, tone: "ok" } : { text: "refused — fixing", tone: "warn" };
     case "read_file":
     case "write_file":
     case "edit_file":
       return { text: String(args.file_path ?? args.path ?? ""), tone: "ok" };
     case "task":
-      return { text: "history returned", tone: "ok" };
+      return { text: "shortlist returned", tone: "ok" };
     default:
       return step.result.startsWith("Error") ? { text: "error", tone: "warn" } : null;
   }

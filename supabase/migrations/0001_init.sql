@@ -1,95 +1,64 @@
--- FixDesk schema. All access goes through the Next.js server using the
+-- Wayfarer schema. All access goes through the Next.js server using the
 -- service-role key, so RLS is enabled with no public policies (anon is denied).
 
-create table if not exists public.landlords (
+create table if not exists public.cities (
   id text primary key,
   name text not null,
-  contact_name text not null default '',
-  approval_limit numeric not null default 400
+  country text not null,
+  center double precision[] not null,
+  tagline text not null default '',
+  transit_cost numeric not null default 2
 );
 
-create table if not exists public.units (
+create table if not exists public.places (
   id text primary key,
-  property_name text not null,
-  address text not null,
-  unit_label text not null,
-  tenant_name text not null,
-  tenant_phone text not null default '',
-  tenant_email text not null default '',
-  appliances jsonb not null default '[]'::jsonb,
-  shutoffs text not null default '',
-  access_notes text not null default '',
-  created_at timestamptz not null default now()
-);
-
-create table if not exists public.vendors (
-  id text primary key,
+  city_id text not null references public.cities(id) on delete cascade,
   name text not null,
-  trades text[] not null,
-  phone text not null default '',
-  emergency_available boolean not null default false,
-  callout_fee numeric not null default 0,
-  hourly_rate numeric not null default 0,
-  rating numeric not null default 0,
-  preferred boolean not null default false,
-  service_area text[] not null default '{}',
-  notes text not null default ''
-);
-
-create table if not exists public.requests (
-  id text primary key,
-  unit_id text not null references public.units(id) on delete cascade,
-  channel text not null default 'portal' check (channel in ('sms', 'email', 'portal')),
-  message text not null,
-  received_at timestamptz not null default now(),
-  status text not null default 'new'
-    check (status in ('new', 'triaged', 'awaiting_tenant', 'needs_approval', 'dispatched', 'resolved'))
-);
-create index if not exists requests_received_idx on public.requests(received_at desc);
-
-create table if not exists public.work_orders (
-  id text primary key,
-  -- Not a foreign key: seeded history rows reference requests that predate the app.
-  request_id text not null,
-  unit_id text not null references public.units(id) on delete cascade,
-  vendor_id text references public.vendors(id),
   category text not null,
-  trade text not null,
-  urgency text not null check (urgency in ('emergency', 'urgent', 'routine')),
-  respond_within_hours numeric not null,
-  respond_by timestamptz not null,
-  hazards jsonb not null default '[]'::jsonb,
-  rationale text not null default '',
-  safety_steps jsonb not null default '[]'::jsonb,
-  scope text not null default '',
-  followup_questions jsonb not null default '[]'::jsonb,
-  estimate_low numeric not null default 0,
-  estimate_high numeric not null default 0,
-  needs_approval boolean not null default false,
-  tenant_message text not null default '',
-  vendor_message text,
-  status text not null default 'ready'
-    check (status in ('ready', 'awaiting_tenant', 'needs_approval', 'dispatched', 'resolved')),
-  created_at timestamptz not null default now()
+  interests text[] not null default '{}',
+  lat double precision not null,
+  lng double precision not null,
+  neighborhood text not null default '',
+  hours jsonb not null,
+  duration_min integer not null,
+  cost numeric not null default 0,
+  rating numeric not null default 0,
+  meals text[],
+  blurb text not null default ''
 );
-create index if not exists work_orders_request_idx on public.work_orders(request_id);
-create index if not exists work_orders_unit_idx on public.work_orders(unit_id, created_at desc);
+create index if not exists places_city_idx on public.places(city_id);
 
--- One agent conversation per request (or one for the whole inbox).
--- messages = serialized LangChain messages, files = the Deep Agent's virtual
--- filesystem, todos = the agent's plan. Persisting these lets a thread resume.
+create table if not exists public.trips (
+  id text primary key,
+  city_id text not null references public.cities(id),
+  title text not null,
+  start_date date not null,
+  days_count integer not null check (days_count between 1 and 5),
+  budget numeric not null,
+  interests text[] not null default '{}',
+  pace text not null check (pace in ('relaxed', 'balanced', 'packed')),
+  notes text not null default '',
+  status text not null default 'draft' check (status in ('draft', 'planned')),
+  days jsonb not null default '[]'::jsonb,
+  summary text not null default '',
+  tips jsonb not null default '[]'::jsonb,
+  total_cost numeric not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- One agent conversation per trip. messages = serialized LangChain messages,
+-- files = the Deep Agent's virtual filesystem, todos = the agent's plan.
 create table if not exists public.threads (
   id text primary key,
-  request_id text,
+  trip_id text,
   messages jsonb not null default '[]'::jsonb,
   files jsonb not null default '{}'::jsonb,
   todos jsonb not null default '[]'::jsonb,
   updated_at timestamptz not null default now()
 );
 
-alter table public.landlords enable row level security;
-alter table public.units enable row level security;
-alter table public.vendors enable row level security;
-alter table public.requests enable row level security;
-alter table public.work_orders enable row level security;
+alter table public.cities enable row level security;
+alter table public.places enable row level security;
+alter table public.trips enable row level security;
 alter table public.threads enable row level security;

@@ -1,5 +1,6 @@
 @import "tailwindcss";
 @import "tw-animate-css";
+@import "leaflet/dist/leaflet.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -8,6 +9,7 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-fraunces);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -31,46 +33,46 @@
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(0.99 0.002 247);
-  --foreground: oklch(0.18 0.02 260);
+  --radius: 0.75rem;
+  --background: oklch(0.985 0.008 85);
+  --foreground: oklch(0.22 0.02 240);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.02 260);
+  --card-foreground: oklch(0.22 0.02 240);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.02 260);
-  --primary: oklch(0.45 0.16 265);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.96 0.01 260);
-  --secondary-foreground: oklch(0.25 0.03 260);
-  --muted: oklch(0.96 0.008 260);
-  --muted-foreground: oklch(0.5 0.02 260);
-  --accent: oklch(0.95 0.015 265);
-  --accent-foreground: oklch(0.25 0.05 265);
+  --popover-foreground: oklch(0.22 0.02 240);
+  --primary: oklch(0.52 0.1 195);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.95 0.02 85);
+  --secondary-foreground: oklch(0.3 0.03 240);
+  --muted: oklch(0.955 0.012 85);
+  --muted-foreground: oklch(0.5 0.02 240);
+  --accent: oklch(0.94 0.03 195);
+  --accent-foreground: oklch(0.3 0.06 195);
   --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.91 0.01 260);
-  --input: oklch(0.91 0.01 260);
-  --ring: oklch(0.6 0.12 265);
+  --border: oklch(0.9 0.015 85);
+  --input: oklch(0.9 0.015 85);
+  --ring: oklch(0.6 0.1 195);
 }
 
 .dark {
-  --background: oklch(0.16 0.015 260);
+  --background: oklch(0.17 0.015 240);
   --foreground: oklch(0.97 0 0);
-  --card: oklch(0.2 0.015 260);
+  --card: oklch(0.21 0.015 240);
   --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.2 0.015 260);
+  --popover: oklch(0.21 0.015 240);
   --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.7 0.14 265);
-  --primary-foreground: oklch(0.16 0.015 260);
-  --secondary: oklch(0.27 0.015 260);
+  --primary: oklch(0.72 0.11 195);
+  --primary-foreground: oklch(0.17 0.015 240);
+  --secondary: oklch(0.27 0.015 240);
   --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.27 0.015 260);
-  --muted-foreground: oklch(0.7 0.02 260);
-  --accent: oklch(0.3 0.03 265);
+  --muted: oklch(0.27 0.015 240);
+  --muted-foreground: oklch(0.7 0.02 240);
+  --accent: oklch(0.3 0.04 195);
   --accent-foreground: oklch(0.97 0 0);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.55 0.1 265);
+  --ring: oklch(0.55 0.1 195);
 }
 
 @layer base {
@@ -80,4 +82,9 @@
   body {
     @apply bg-background text-foreground;
   }
+}
+
+.leaflet-container {
+  font-family: inherit;
+  background: var(--muted);
 }

@@ -1,251 +1,95 @@
-import type { Landlord, MaintenanceRequest, Unit, Vendor, WorkOrder } from "./types";
+import type { City, Hours, Place } from "./types";
 
-// Synthetic, fictional data used to seed an empty database (and the in-memory
-// fallback). No real people, addresses or businesses.
+// Curated sample catalog. Coordinates are approximate; hours and prices are
+// simplified typical values for demo purposes. Verify before travelling.
 
-const iso = (hoursAgo: number) => new Date(Date.now() - hoursAgo * 3600_000).toISOString();
+export const CITIES: City[] = [
+  { id: "lisbon", name: "Lisbon", country: "Portugal", center: [38.7139, -9.1500], tagline: "Hills, tiles, custard tarts and fado", transit_cost: 2 },
+  { id: "rome", name: "Rome", country: "Italy", center: [41.8960, 12.4830], tagline: "Ancient ruins, piazzas and long dinners", transit_cost: 2 },
+  { id: "kyoto", name: "Kyoto", country: "Japan", center: [35.0050, 135.7600], tagline: "Temples, gardens and lantern-lit alleys", transit_cost: 2 },
+];
 
-export const LANDLORD: Landlord = {
-  id: "maple-pine",
-  name: "Maple & Pine Rentals",
-  contact_name: "Sam Ortiz",
-  approval_limit: 400,
-};
+const ALL: Hours = { open: "00:00", close: "24:00", closed: [] };
+const h = (open: string, close: string, closed: number[] = []): Hours => ({ open, close, closed });
 
-export function seedUnits(): Unit[] {
-  const ts = iso(24 * 400);
+type Raw = Omit<Place, "city_id">;
+
+const LISBON: Raw[] = [
+  { id: "lis-pao-pao", name: "Pão Pão Queijo Queijo", category: "food", interests: ["food"], lat: 38.6973, lng: -9.2045, neighborhood: "Belém", hours: h("08:00", "24:00"), duration_min: 35, cost: 9, rating: 4.3, meals: ["lunch", "dinner"], blurb: "Cheap, cheerful sandwiches and wraps next to Jerónimos." },
+  { id: "lis-belem-tower", name: "Belém Tower", category: "sight", interests: ["history", "architecture"], lat: 38.6916, lng: -9.216, neighborhood: "Belém", hours: h("10:00", "18:30", [1]), duration_min: 60, cost: 11, rating: 4.6, blurb: "16th-century fortress on the Tagus, symbol of the Age of Discovery." },
+  { id: "lis-jeronimos", name: "Jerónimos Monastery", category: "sight", interests: ["history", "architecture"], lat: 38.6979, lng: -9.2068, neighborhood: "Belém", hours: h("09:30", "18:00", [1]), duration_min: 90, cost: 13, rating: 4.7, blurb: "Manueline masterpiece with a breathtaking cloister." },
+  { id: "lis-pasteis", name: "Pastéis de Belém", category: "cafe", interests: ["food"], lat: 38.6975, lng: -9.2032, neighborhood: "Belém", hours: h("08:00", "23:00"), duration_min: 30, cost: 6, rating: 4.7, meals: ["breakfast"], blurb: "The original custard tart bakery, since 1837." },
+  { id: "lis-maat", name: "MAAT", category: "museum", interests: ["art", "architecture"], lat: 38.6958, lng: -9.1945, neighborhood: "Belém", hours: h("10:00", "19:00", [2]), duration_min: 75, cost: 12, rating: 4.4, blurb: "Museum of Art, Architecture and Technology with a walkable wave-shaped roof." },
+  { id: "lis-castle", name: "São Jorge Castle", category: "sight", interests: ["history", "views"], lat: 38.7139, lng: -9.1335, neighborhood: "Alfama", hours: h("09:00", "21:00"), duration_min: 90, cost: 16, rating: 4.6, blurb: "Moorish castle ramparts with the best panorama of the city." },
+  { id: "lis-santa-luzia", name: "Miradouro de Santa Luzia", category: "viewpoint", interests: ["views", "architecture"], lat: 38.7118, lng: -9.1302, neighborhood: "Alfama", hours: ALL, duration_min: 25, cost: 0, rating: 4.7, blurb: "Tiled terrace overlooking Alfama's rooftops and the river." },
+  { id: "lis-se", name: "Lisbon Cathedral (Sé)", category: "sight", interests: ["history", "architecture"], lat: 38.7099, lng: -9.1334, neighborhood: "Alfama", hours: h("09:30", "19:00", [0]), duration_min: 30, cost: 5, rating: 4.4, blurb: "Fortress-like Romanesque cathedral from the 12th century." },
+  { id: "lis-tile-museum", name: "National Tile Museum", category: "museum", interests: ["art", "history"], lat: 38.7247, lng: -9.1137, neighborhood: "Xabregas", hours: h("10:00", "18:00", [1]), duration_min: 75, cost: 8, rating: 4.6, blurb: "Five centuries of azulejos in a former convent." },
+  { id: "lis-time-out", name: "Time Out Market", category: "food", interests: ["food"], lat: 38.7069, lng: -9.1459, neighborhood: "Cais do Sodré", hours: h("10:00", "24:00"), duration_min: 60, cost: 20, rating: 4.4, meals: ["lunch", "dinner"], blurb: "Food hall with stalls from the city's best chefs." },
+  { id: "lis-lx-factory", name: "LX Factory", category: "shopping", interests: ["shopping", "art"], lat: 38.7036, lng: -9.1784, neighborhood: "Alcântara", hours: h("10:00", "23:00"), duration_min: 75, cost: 0, rating: 4.5, blurb: "Converted industrial complex of bookshops, studios and cafés." },
+  { id: "lis-gulbenkian", name: "Gulbenkian Museum", category: "museum", interests: ["art"], lat: 38.7375, lng: -9.1545, neighborhood: "Avenidas Novas", hours: h("10:00", "18:00", [2]), duration_min: 120, cost: 15, rating: 4.7, blurb: "World-class private collection set in modernist gardens." },
+  { id: "lis-comercio", name: "Praça do Comércio", category: "sight", interests: ["history", "architecture"], lat: 38.7075, lng: -9.1364, neighborhood: "Baixa", hours: ALL, duration_min: 25, cost: 0, rating: 4.6, blurb: "Grand riverside square rebuilt after the 1755 earthquake." },
+  { id: "lis-santa-justa", name: "Santa Justa Lift", category: "viewpoint", interests: ["views", "architecture"], lat: 38.7121, lng: -9.1394, neighborhood: "Baixa", hours: h("07:30", "23:00"), duration_min: 20, cost: 6, rating: 4.2, blurb: "Neo-Gothic iron elevator linking Baixa and Chiado." },
+  { id: "lis-taberna", name: "Taberna da Rua das Flores", category: "food", interests: ["food"], lat: 38.7109, lng: -9.1446, neighborhood: "Chiado", hours: h("12:00", "23:00", [0]), duration_min: 75, cost: 30, rating: 4.6, meals: ["lunch", "dinner"], blurb: "Tiny tavern serving inventive Portuguese petiscos." },
+  { id: "lis-senhora-monte", name: "Miradouro da Senhora do Monte", category: "viewpoint", interests: ["views"], lat: 38.7192, lng: -9.1325, neighborhood: "Graça", hours: ALL, duration_min: 25, cost: 0, rating: 4.8, blurb: "Highest viewpoint in the city; magical at sunset." },
+  { id: "lis-oceanario", name: "Lisbon Oceanarium", category: "museum", interests: ["family", "nature"], lat: 38.7635, lng: -9.0937, neighborhood: "Parque das Nações", hours: h("10:00", "20:00"), duration_min: 120, cost: 25, rating: 4.7, blurb: "One of Europe's largest aquariums." },
+  { id: "lis-ramiro", name: "Cervejaria Ramiro", category: "food", interests: ["food"], lat: 38.7208, lng: -9.1357, neighborhood: "Intendente", hours: h("12:00", "23:30", [1]), duration_min: 75, cost: 40, rating: 4.6, meals: ["lunch", "dinner"], blurb: "Legendary seafood beer hall. Finish with a steak sandwich." },
+  { id: "lis-fado", name: "Fado at A Tasca do Chico", category: "nightlife", interests: ["nightlife"], lat: 38.7117, lng: -9.1449, neighborhood: "Bairro Alto", hours: h("19:00", "24:00"), duration_min: 90, cost: 15, rating: 4.5, blurb: "Intimate fado house where locals sing until late." },
+  { id: "lis-o-trevo", name: "O Trevo", category: "food", interests: ["food"], lat: 38.7106, lng: -9.1437, neighborhood: "Chiado", hours: h("07:30", "23:00", [0]), duration_min: 40, cost: 8, rating: 4.3, meals: ["lunch", "dinner"], blurb: "No-frills spot for a classic bifana pork sandwich." },
+  { id: "lis-ladra", name: "Feira da Ladra flea market", category: "market", interests: ["shopping"], lat: 38.7149, lng: -9.126, neighborhood: "Graça", hours: h("09:00", "18:00", [0, 1, 3, 4, 5]), duration_min: 60, cost: 0, rating: 4.2, blurb: "Bric-a-brac market, Tuesdays and Saturdays only." },
+];
+
+const ROME: Raw[] = [
+  { id: "rom-pizzarium", name: "Pizzarium Bonci", category: "food", interests: ["food"], lat: 41.9072, lng: 12.4466, neighborhood: "Vatican", hours: h("11:00", "22:00"), duration_min: 40, cost: 10, rating: 4.6, meals: ["lunch", "dinner"], blurb: "Legendary pizza al taglio by the slice, steps from the Vatican." },
+  { id: "rom-trapizzino", name: "Trapizzino Trastevere", category: "food", interests: ["food"], lat: 41.8897, lng: 12.4703, neighborhood: "Trastevere", hours: h("12:00", "24:00"), duration_min: 40, cost: 9, rating: 4.5, meals: ["lunch", "dinner"], blurb: "Pizza-pocket street food stuffed with Roman stews." },
+  { id: "rom-colosseum", name: "Colosseum", category: "sight", interests: ["history", "architecture"], lat: 41.8902, lng: 12.4922, neighborhood: "Monti", hours: h("08:30", "19:00"), duration_min: 90, cost: 20, rating: 4.8, blurb: "The 2,000-year-old amphitheatre. Book a timed entry." },
+  { id: "rom-forum", name: "Roman Forum & Palatine Hill", category: "sight", interests: ["history"], lat: 41.8925, lng: 12.4853, neighborhood: "Monti", hours: h("09:00", "19:00"), duration_min: 120, cost: 0, rating: 4.7, blurb: "Heart of ancient Rome; included in the Colosseum ticket." },
+  { id: "rom-pantheon", name: "Pantheon", category: "sight", interests: ["history", "architecture"], lat: 41.8986, lng: 12.4769, neighborhood: "Centro Storico", hours: h("09:00", "19:00"), duration_min: 40, cost: 6, rating: 4.8, blurb: "Perfectly preserved temple with its open oculus." },
+  { id: "rom-trevi", name: "Trevi Fountain", category: "sight", interests: ["architecture"], lat: 41.9009, lng: 12.4833, neighborhood: "Trevi", hours: ALL, duration_min: 20, cost: 0, rating: 4.7, blurb: "Baroque fountain. Toss a coin, come back to Rome." },
+  { id: "rom-vatican-museums", name: "Vatican Museums & Sistine Chapel", category: "museum", interests: ["art", "history"], lat: 41.9065, lng: 12.4536, neighborhood: "Vatican", hours: h("08:00", "19:00", [0]), duration_min: 180, cost: 22, rating: 4.7, blurb: "Raphael's rooms and Michelangelo's ceiling." },
+  { id: "rom-st-peters", name: "St. Peter's Basilica", category: "sight", interests: ["architecture", "history"], lat: 41.9022, lng: 12.4539, neighborhood: "Vatican", hours: h("07:00", "19:00"), duration_min: 75, cost: 0, rating: 4.8, blurb: "The largest church in the world; climb the dome for views." },
+  { id: "rom-navona", name: "Piazza Navona", category: "sight", interests: ["architecture"], lat: 41.8992, lng: 12.4731, neighborhood: "Centro Storico", hours: ALL, duration_min: 30, cost: 0, rating: 4.7, blurb: "Oval piazza with Bernini's Fountain of the Four Rivers." },
+  { id: "rom-borghese-gallery", name: "Borghese Gallery", category: "museum", interests: ["art"], lat: 41.9142, lng: 12.4922, neighborhood: "Borghese", hours: h("09:00", "19:00", [1]), duration_min: 120, cost: 17, rating: 4.8, blurb: "Bernini and Caravaggio in a villa. Reservations required." },
+  { id: "rom-villa-borghese", name: "Villa Borghese gardens", category: "park", interests: ["nature", "family"], lat: 41.9128, lng: 12.4852, neighborhood: "Borghese", hours: ALL, duration_min: 60, cost: 0, rating: 4.6, blurb: "Rome's green lung; rent a rowboat on the lake." },
+  { id: "rom-campo", name: "Campo de' Fiori market", category: "market", interests: ["food", "shopping"], lat: 41.8956, lng: 12.4722, neighborhood: "Centro Storico", hours: h("07:00", "14:00", [0]), duration_min: 40, cost: 5, rating: 4.3, blurb: "Morning produce market in a lively square." },
+  { id: "rom-da-enzo", name: "Da Enzo al 29", category: "food", interests: ["food"], lat: 41.8886, lng: 12.4776, neighborhood: "Trastevere", hours: h("12:30", "23:00", [0]), duration_min: 75, cost: 35, rating: 4.6, meals: ["lunch", "dinner"], blurb: "Classic Roman trattoria: carbonara and cacio e pepe." },
+  { id: "rom-roscioli", name: "Roscioli Salumeria", category: "food", interests: ["food"], lat: 41.8939, lng: 12.4743, neighborhood: "Centro Storico", hours: h("12:30", "23:00"), duration_min: 75, cost: 45, rating: 4.6, meals: ["lunch", "dinner"], blurb: "Deli-restaurant famous for its carbonara and wine list." },
+  { id: "rom-spanish-steps", name: "Spanish Steps", category: "sight", interests: ["architecture", "shopping"], lat: 41.906, lng: 12.4828, neighborhood: "Tridente", hours: ALL, duration_min: 25, cost: 0, rating: 4.5, blurb: "Iconic staircase below Trinità dei Monti." },
+  { id: "rom-giolitti", name: "Giolitti", category: "cafe", interests: ["food"], lat: 41.901, lng: 12.4767, neighborhood: "Centro Storico", hours: h("07:00", "24:00"), duration_min: 20, cost: 4, rating: 4.4, meals: ["breakfast"], blurb: "Historic gelateria since 1900." },
+  { id: "rom-capitoline", name: "Capitoline Museums", category: "museum", interests: ["art", "history"], lat: 41.8933, lng: 12.4828, neighborhood: "Campidoglio", hours: h("09:30", "19:30"), duration_min: 120, cost: 17, rating: 4.7, blurb: "The world's oldest public museum, on Michelangelo's piazza." },
+  { id: "rom-ai-marmi", name: "Pizzeria Ai Marmi", category: "food", interests: ["food"], lat: 41.8883, lng: 12.4721, neighborhood: "Trastevere", hours: h("18:30", "24:00", [3]), duration_min: 60, cost: 20, rating: 4.4, meals: ["dinner"], blurb: "Paper-thin Roman pizza on marble tables." },
+  { id: "rom-testaccio", name: "Mercato di Testaccio", category: "food", interests: ["food", "shopping"], lat: 41.877, lng: 12.4752, neighborhood: "Testaccio", hours: h("07:00", "15:30", [0]), duration_min: 60, cost: 12, rating: 4.5, meals: ["lunch"], blurb: "Locals' market with street-food stalls." },
+  { id: "rom-gianicolo", name: "Gianicolo Terrace", category: "viewpoint", interests: ["views"], lat: 41.8913, lng: 12.4614, neighborhood: "Trastevere", hours: ALL, duration_min: 30, cost: 0, rating: 4.7, blurb: "Panorama over the domes of Rome, best at sunset." },
+  { id: "rom-freni", name: "Freni e Frizioni", category: "nightlife", interests: ["nightlife"], lat: 41.892, lng: 12.4699, neighborhood: "Trastevere", hours: h("18:00", "24:00"), duration_min: 60, cost: 15, rating: 4.3, blurb: "Buzzing aperitivo bar in a former garage." },
+];
+
+const KYOTO: Raw[] = [
+  { id: "kyo-omen", name: "Omen Ginkakuji (udon)", category: "food", interests: ["food"], lat: 35.0262, lng: 135.7952, neighborhood: "Sakyo", hours: h("11:00", "21:00", [4]), duration_min: 45, cost: 14, rating: 4.4, meals: ["lunch", "dinner"], blurb: "Hand-made udon dipped in hot broth with seasonal vegetables." },
+  { id: "kyo-yoshimura", name: "Arashiyama Yoshimura (soba)", category: "food", interests: ["food"], lat: 35.0137, lng: 135.6779, neighborhood: "Arashiyama", hours: h("11:00", "17:00"), duration_min: 45, cost: 15, rating: 4.3, meals: ["lunch"], blurb: "Buckwheat soba with a view over the Togetsukyō bridge." },
+  { id: "kyo-fushimi", name: "Fushimi Inari Taisha", category: "sight", interests: ["history", "nature"], lat: 34.9671, lng: 135.7727, neighborhood: "Fushimi", hours: ALL, duration_min: 120, cost: 0, rating: 4.8, blurb: "Thousands of vermilion torii gates up a forested mountain. Go early." },
+  { id: "kyo-kiyomizu", name: "Kiyomizu-dera", category: "sight", interests: ["history", "architecture", "views"], lat: 34.9949, lng: 135.785, neighborhood: "Higashiyama", hours: h("06:00", "18:00"), duration_min: 90, cost: 3, rating: 4.7, blurb: "Wooden stage temple jutting over the hillside." },
+  { id: "kyo-sannenzaka", name: "Sannenzaka & Ninenzaka", category: "shopping", interests: ["shopping", "architecture"], lat: 34.9963, lng: 135.7808, neighborhood: "Higashiyama", hours: h("09:00", "18:00"), duration_min: 45, cost: 0, rating: 4.6, blurb: "Preserved stone-paved lanes of tea houses and crafts." },
+  { id: "kyo-gion", name: "Gion evening walk", category: "sight", interests: ["history", "nightlife"], lat: 35.0037, lng: 135.7752, neighborhood: "Gion", hours: ALL, duration_min: 45, cost: 0, rating: 4.6, blurb: "Machiya townhouses and lantern-lit Hanami-koji." },
+  { id: "kyo-kinkakuji", name: "Kinkaku-ji (Golden Pavilion)", category: "sight", interests: ["history", "architecture"], lat: 35.0394, lng: 135.7292, neighborhood: "Kita", hours: h("09:00", "17:00"), duration_min: 60, cost: 3, rating: 4.7, blurb: "Gold-leaf pavilion reflected in a mirror pond." },
+  { id: "kyo-bamboo", name: "Arashiyama Bamboo Grove", category: "park", interests: ["nature"], lat: 35.017, lng: 135.6713, neighborhood: "Arashiyama", hours: ALL, duration_min: 45, cost: 0, rating: 4.5, blurb: "Towering bamboo paths; magical before 8am." },
+  { id: "kyo-tenryuji", name: "Tenryū-ji", category: "sight", interests: ["history", "nature"], lat: 35.0157, lng: 135.6738, neighborhood: "Arashiyama", hours: h("08:30", "17:00"), duration_min: 60, cost: 4, rating: 4.6, blurb: "Zen temple with a 14th-century landscape garden." },
+  { id: "kyo-nishiki", name: "Nishiki Market", category: "food", interests: ["food", "shopping"], lat: 35.005, lng: 135.7649, neighborhood: "Downtown", hours: h("09:30", "17:30"), duration_min: 60, cost: 15, rating: 4.4, meals: ["lunch"], blurb: "'Kyoto's kitchen': a covered street of food stalls." },
+  { id: "kyo-philosopher", name: "Philosopher's Path", category: "park", interests: ["nature"], lat: 35.0268, lng: 135.7953, neighborhood: "Sakyo", hours: ALL, duration_min: 45, cost: 0, rating: 4.5, blurb: "Canal-side stroll lined with cherry trees." },
+  { id: "kyo-ginkakuji", name: "Ginkaku-ji (Silver Pavilion)", category: "sight", interests: ["history", "nature"], lat: 35.027, lng: 135.7982, neighborhood: "Sakyo", hours: h("08:30", "17:00"), duration_min: 45, cost: 3, rating: 4.5, blurb: "Understated villa with a raked-sand garden." },
+  { id: "kyo-nijo", name: "Nijō Castle", category: "sight", interests: ["history", "architecture"], lat: 35.0142, lng: 135.7481, neighborhood: "Nakagyo", hours: h("08:45", "16:00", [2]), duration_min: 75, cost: 6, rating: 4.5, blurb: "Shogun's palace with 'nightingale' floors that squeak." },
+  { id: "kyo-national-museum", name: "Kyoto National Museum", category: "museum", interests: ["art", "history"], lat: 34.99, lng: 135.7731, neighborhood: "Higashiyama", hours: h("09:30", "17:00", [1]), duration_min: 90, cost: 5, rating: 4.4, blurb: "Japanese art and treasures from Kyoto's temples." },
+  { id: "kyo-pontocho", name: "Pontochō dinner", category: "food", interests: ["food", "nightlife"], lat: 35.0059, lng: 135.7712, neighborhood: "Pontochō", hours: h("17:00", "23:00"), duration_min: 75, cost: 35, rating: 4.5, meals: ["dinner"], blurb: "Narrow alley of riverside restaurants." },
+  { id: "kyo-ramen", name: "Ramen Sen no Kaze", category: "food", interests: ["food"], lat: 35.0049, lng: 135.7656, neighborhood: "Downtown", hours: h("11:00", "21:30", [1]), duration_min: 45, cost: 12, rating: 4.6, meals: ["lunch", "dinner"], blurb: "Rich, beloved local ramen. Expect a queue." },
+  { id: "kyo-arabica", name: "% Arabica Higashiyama", category: "cafe", interests: ["food"], lat: 34.9985, lng: 135.7808, neighborhood: "Higashiyama", hours: h("08:00", "18:00"), duration_min: 20, cost: 5, rating: 4.4, meals: ["breakfast"], blurb: "Minimalist coffee with a pagoda view." },
+  { id: "kyo-imperial", name: "Kyoto Imperial Palace", category: "park", interests: ["history", "nature"], lat: 35.0254, lng: 135.7621, neighborhood: "Kamigyo", hours: h("09:00", "16:30", [1]), duration_min: 60, cost: 0, rating: 4.3, blurb: "Former emperor's residence in a vast park." },
+  { id: "kyo-tofukuji", name: "Tōfuku-ji", category: "sight", interests: ["history", "nature"], lat: 34.9767, lng: 135.7738, neighborhood: "Higashiyama", hours: h("09:00", "16:00"), duration_min: 45, cost: 4, rating: 4.6, blurb: "Zen temple famous for its maple-filled valley." },
+  { id: "kyo-gion-corner", name: "Gion Corner show", category: "nightlife", interests: ["nightlife", "history"], lat: 35.001, lng: 135.775, neighborhood: "Gion", hours: h("18:00", "20:00"), duration_min: 60, cost: 25, rating: 4.1, blurb: "Sampler of seven traditional arts including maiko dance." },
+  { id: "kyo-karyo", name: "Gion Karyo (kaiseki)", category: "food", interests: ["food"], lat: 35.0029, lng: 135.7757, neighborhood: "Gion", hours: h("17:30", "22:00", [3]), duration_min: 90, cost: 90, rating: 4.6, meals: ["dinner"], blurb: "Seasonal multi-course kaiseki in a townhouse." },
+];
+
+export function seedPlaces(): Place[] {
   return [
-    {
-      id: "maple-1a",
-      property_name: "Maple Court",
-      address: "118 Maple Ct, Springfield",
-      unit_label: "1A",
-      tenant_name: "Lena Brooks",
-      tenant_phone: "555-0101",
-      tenant_email: "lena.brooks@example.com",
-      appliances: [
-        { type: "range/stove", fuel: "gas", age_years: 9 },
-        { type: "water heater", fuel: "gas", age_years: 6 },
-      ],
-      shutoffs: "Gas: meter on the east side of the building, valve handle turns 1/4. Water: under kitchen sink and at the basement main (unit-labelled).",
-      access_notes: "Has a cat; keep the door closed. Prefers texts.",
-      created_at: ts,
-    },
-    {
-      id: "maple-1b",
-      property_name: "Maple Court",
-      address: "118 Maple Ct, Springfield",
-      unit_label: "1B",
-      tenant_name: "Omar Haddad",
-      tenant_phone: "555-0102",
-      tenant_email: "omar.h@example.com",
-      appliances: [{ type: "range/stove", fuel: "electric", age_years: 4 }],
-      shutoffs: "Water: under each sink; bathroom main behind the access panel in the hall closet.",
-      access_notes: "Works nights — schedule visits after 1pm.",
-      created_at: ts,
-    },
-    {
-      id: "maple-2a",
-      property_name: "Maple Court",
-      address: "118 Maple Ct, Springfield",
-      unit_label: "2A",
-      tenant_name: "Grace Liu",
-      tenant_phone: "555-0103",
-      tenant_email: "grace.liu@example.com",
-      appliances: [{ type: "electrical panel", age_years: 31, notes: "Original 1993 panel, 100A" }],
-      shutoffs: "Breaker panel: kitchen pantry wall. Water: under sinks.",
-      access_notes: "Lockbox code on file with Sam.",
-      created_at: ts,
-    },
-    {
-      id: "maple-2b",
-      property_name: "Maple Court",
-      address: "118 Maple Ct, Springfield",
-      unit_label: "2B",
-      tenant_name: "Diego Ramírez",
-      tenant_phone: "555-0104",
-      tenant_email: "diego.r@example.com",
-      appliances: [{ type: "dishwasher", age_years: 3 }],
-      shutoffs: "Water: valves under the kitchen sink (left = hot, right = cold); building main in basement room B-2.",
-      access_notes: "Unit 1B is directly below — check for ceiling leaks there after any water issue.",
-      created_at: ts,
-    },
-    {
-      id: "pine-3c",
-      property_name: "Pine Street Duplex",
-      address: "42 Pine St, Springfield",
-      unit_label: "3C",
-      tenant_name: "Priya Nair",
-      tenant_phone: "555-0201",
-      tenant_email: "priya.nair@example.com",
-      appliances: [{ type: "furnace", fuel: "gas", age_years: 17, notes: "Forced-air, thermostat in hallway" }],
-      shutoffs: "Furnace power switch at the top of the basement stairs. Gas: meter behind the side gate.",
-      access_notes: "Dog in the backyard — call before entering the side gate.",
-      created_at: ts,
-    },
-    {
-      id: "pine-4a",
-      property_name: "Pine Street Duplex",
-      address: "42 Pine St, Springfield",
-      unit_label: "4A",
-      tenant_name: "Marcus Bell",
-      tenant_phone: "555-0202",
-      tenant_email: "marcus.bell@example.com",
-      appliances: [
-        { type: "dishwasher", age_years: 8 },
-        { type: "refrigerator", age_years: 12 },
-      ],
-      shutoffs: "Water: under kitchen sink; main in the crawlspace hatch by the back door.",
-      access_notes: "Any time with 24h notice.",
-      created_at: ts,
-    },
-  ];
-}
-
-export function seedVendors(): Vendor[] {
-  const both = ["Maple Court", "Pine Street Duplex"];
-  return [
-    { id: "v-rapid-rooter", name: "Rapid Rooter Plumbing", trades: ["plumbing"], phone: "555-1001", emergency_available: true, callout_fee: 150, hourly_rate: 125, rating: 4.7, preferred: true, service_area: both, notes: "24/7 line. Carries common valves and supply lines." },
-    { id: "v-budget-plumb", name: "Budget Pipe & Drain", trades: ["plumbing"], phone: "555-1002", emergency_available: false, callout_fee: 60, hourly_rate: 85, rating: 4.2, preferred: false, service_area: both, notes: "Weekdays only. Good for drips and clogs." },
-    { id: "v-bright-electric", name: "BrightLine Electric", trades: ["electrical"], phone: "555-1003", emergency_available: true, callout_fee: 175, hourly_rate: 140, rating: 4.8, preferred: true, service_area: both, notes: "Licensed master electrician; 2h emergency response." },
-    { id: "v-cozy-hvac", name: "CozyAir Heating & Cooling", trades: ["hvac", "gas"], phone: "555-1004", emergency_available: true, callout_fee: 160, hourly_rate: 130, rating: 4.5, preferred: true, service_area: both, notes: "Services the Pine St furnace; has the service history." },
-    { id: "v-northside-gas", name: "Northside Gas Fitters", trades: ["gas", "plumbing"], phone: "555-1005", emergency_available: true, callout_fee: 200, hourly_rate: 150, rating: 4.6, preferred: false, service_area: ["Maple Court"], notes: "Certified gas fitter. Will not enter until the utility has cleared the site." },
-    { id: "v-appliance-pros", name: "Appliance Pros", trades: ["appliance"], phone: "555-1006", emergency_available: false, callout_fee: 89, hourly_rate: 110, rating: 4.4, preferred: true, service_area: both, notes: "Next-day slots usually available." },
-    { id: "v-handy-hank", name: "Handy Hank Services", trades: ["general"], phone: "555-1007", emergency_available: false, callout_fee: 0, hourly_rate: 65, rating: 4.6, preferred: true, service_area: both, notes: "Doors, drywall, fixtures, small carpentry." },
-    { id: "v-quick-lock", name: "QuickKey Locksmith", trades: ["locksmith"], phone: "555-1008", emergency_available: true, callout_fee: 95, hourly_rate: 90, rating: 4.3, preferred: true, service_area: both, notes: "" },
-    { id: "v-green-pest", name: "GreenGuard Pest", trades: ["pest"], phone: "555-1009", emergency_available: false, callout_fee: 120, hourly_rate: 0, rating: 4.5, preferred: true, service_area: both, notes: "Flat-rate treatments." },
-  ];
-}
-
-export function seedRequests(): MaintenanceRequest[] {
-  return [
-    {
-      id: "req-leak-2b",
-      unit_id: "maple-2b",
-      channel: "sms",
-      message:
-        "Hi, there's water coming out from under the kitchen sink and it's spreading across the floor. I put towels down but it keeps coming. What do I do??",
-      received_at: iso(0.2),
-      status: "new",
-    },
-    {
-      id: "req-gas-1a",
-      unit_id: "maple-1a",
-      channel: "sms",
-      message: "I've been smelling something like rotten eggs near the stove since this morning. Is that normal?",
-      received_at: iso(0.5),
-      status: "new",
-    },
-    {
-      id: "req-heat-3c",
-      unit_id: "pine-3c",
-      channel: "email",
-      message:
-        "Hello, the heat hasn't come on since last night. The thermostat says 58 degrees inside. I tried turning it off and on again. This is the third time this winter.",
-      received_at: iso(3),
-      status: "new",
-    },
-    {
-      id: "req-spark-2a",
-      unit_id: "maple-2a",
-      channel: "portal",
-      message:
-        "The outlet next to my bed sparked when I plugged in my phone charger and now there's a burning smell. I unplugged everything in that room.",
-      received_at: iso(1),
-      status: "new",
-    },
-    {
-      id: "req-multi-4a",
-      unit_id: "pine-4a",
-      channel: "email",
-      message:
-        "The dishwasher isn't draining - there's standing water at the bottom after every cycle. Also, whenever someone has time, the bedroom closet door came off its track.",
-      received_at: iso(20),
-      status: "new",
-    },
-    {
-      id: "req-drip-1b",
-      unit_id: "maple-1b",
-      channel: "portal",
-      message: "Bathroom sink faucet drips constantly, even when it's turned all the way off. Not urgent.",
-      received_at: iso(30),
-      status: "new",
-    },
-    {
-      id: "req-fridge-4a",
-      unit_id: "pine-4a",
-      channel: "sms",
-      message: "something is wrong with the fridge",
-      received_at: iso(2),
-      status: "new",
-    },
-  ];
-}
-
-/** Past, resolved work orders, so the agent can spot repeat issues. */
-export function seedHistory(): WorkOrder[] {
-  const base = {
-    vendor_message: null,
-    hazards: [],
-    safety_steps: [],
-    followup_questions: [],
-    needs_approval: false,
-    status: "resolved" as const,
-  };
-  return [
-    {
-      ...base,
-      id: "wo-hist-1",
-      request_id: "hist-1",
-      unit_id: "pine-3c",
-      vendor_id: "v-cozy-hvac",
-      category: "No heat",
-      trade: "hvac",
-      urgency: "urgent",
-      respond_within_hours: 24,
-      respond_by: iso(24 * 61),
-      rationale: "Furnace not igniting.",
-      scope: "Replaced flame sensor.",
-      estimate_low: 160,
-      estimate_high: 290,
-      tenant_message: "",
-      created_at: iso(24 * 62),
-    },
-    {
-      ...base,
-      id: "wo-hist-2",
-      request_id: "hist-2",
-      unit_id: "pine-3c",
-      vendor_id: "v-cozy-hvac",
-      category: "No heat",
-      trade: "hvac",
-      urgency: "urgent",
-      respond_within_hours: 24,
-      respond_by: iso(24 * 20),
-      rationale: "Furnace short-cycling and shutting off.",
-      scope: "Cleaned burners, replaced igniter. Tech noted heat exchanger wear; recommended replacement quote (unit is 17 yrs old).",
-      estimate_low: 290,
-      estimate_high: 420,
-      tenant_message: "",
-      created_at: iso(24 * 21),
-    },
-    {
-      ...base,
-      id: "wo-hist-3",
-      request_id: "hist-3",
-      unit_id: "pine-4a",
-      vendor_id: "v-appliance-pros",
-      category: "Dishwasher leak",
-      trade: "appliance",
-      urgency: "routine",
-      respond_within_hours: 168,
-      respond_by: iso(24 * 140),
-      rationale: "Door gasket leak.",
-      scope: "Replaced door gasket.",
-      estimate_low: 89,
-      estimate_high: 200,
-      tenant_message: "",
-      created_at: iso(24 * 145),
-    },
+    ...LISBON.map((p) => ({ ...p, city_id: "lisbon" })),
+    ...ROME.map((p) => ({ ...p, city_id: "rome" })),
+    ...KYOTO.map((p) => ({ ...p, city_id: "kyoto" })),
   ];
 }

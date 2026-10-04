@@ -23,8 +23,8 @@ export type { AgentEvent };
 
 export const CONTEXT_PREFIX = "[context]";
 
-export function contextLine(requestId: string | null) {
-  return `${CONTEXT_PREFIX} ${requestId ? `request_id=${requestId}` : "portfolio view (no specific request)"} now=${new Date().toISOString()}`;
+export function contextLine(tripId: string | null) {
+  return `${CONTEXT_PREFIX} ${tripId ? `trip_id=${tripId}` : "no trip selected"}`;
 }
 
 export function textOf(content: BaseMessage["content"]): string {
@@ -38,21 +38,23 @@ const truncate = (s: string, n = 4000) => (s.length > n ? `${s.slice(0, n)}\n…
 
 type RunArgs = {
   threadId: string;
-  requestId: string | null;
+  tripId: string | null;
   message: string;
   /** Test seams: inject models (defaults to Claude via ChatAnthropic). */
   model?: BaseChatModel;
   subagentModel?: BaseChatModel;
+  /** Anthropic key for this turn; null runs demo mode. */
+  apiKey?: string | null;
 };
 
-export async function* runTurn({ threadId, requestId, message, model, subagentModel }: RunArgs): AsyncGenerator<AgentEvent> {
+export async function* runTurn({ threadId, tripId, message, model, subagentModel, apiKey }: RunArgs): AsyncGenerator<AgentEvent> {
   const repo = getRepo();
   const existing = await repo.getThread(threadId);
   const history = existing ? mapStoredMessagesToChatMessages(existing.messages as StoredMessage[]) : [];
   const workspace = existing?.files ?? {};
 
-  const human = new HumanMessage(`${contextLine(requestId)}\n${message}`);
-  const agent = buildAgent({ model, subagentModel });
+  const human = new HumanMessage(`${contextLine(tripId)}\n${message}`);
+  const agent = buildAgent({ model, subagentModel, apiKey });
 
   let finalMessages: BaseMessage[] = [...history, human];
   let finalFiles: Record<string, StoredFile> = workspace;
@@ -111,7 +113,7 @@ export async function* runTurn({ threadId, requestId, message, model, subagentMo
             const name = m.name ?? toolNames.get(m.tool_call_id) ?? "tool";
             const content = textOf(m.content);
             yield { type: "tool_result", id: m.tool_call_id, name, content: truncate(content), subagent };
-            if (name === "create_work_order" && content.includes('"saved": true')) yield { type: "work_order_saved" };
+            if (name === "save_itinerary" && content.includes('"saved": true')) yield { type: "trip_saved" };
           }
         }
         if (root && u.todos) yield { type: "todos", todos: u.todos };
@@ -136,7 +138,7 @@ export async function* runTurn({ threadId, requestId, message, model, subagentMo
     await repo
       .saveThread({
         id: threadId,
-        request_id: requestId,
+        trip_id: tripId,
         messages: mapChatMessagesToStoredMessages(finalMessages),
         files,
         todos: finalTodos,
@@ -146,7 +148,7 @@ export async function* runTurn({ threadId, requestId, message, model, subagentMo
   yield { type: "done" };
 }
 
-/** Thread → UI-friendly transcript (used when reopening a request). */
+/** Thread → UI-friendly transcript (used when reopening a trip). */
 export function transcript(stored: unknown[]) {
   const msgs = mapStoredMessagesToChatMessages(stored as StoredMessage[]);
   const out: TranscriptEntry[] = [];

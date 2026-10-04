@@ -1,9 +1,14 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Fraunces, Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
+
+const display = Fraunces({
+  variable: "--font-fraunces",
   subsets: ["latin"],
 });
 
@@ -13,15 +18,15 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "FixDesk — maintenance triage agent",
-  description: "A LangGraph Deep Agent that triages tenant maintenance requests into safe, well-scoped work orders with vendor dispatch and drafted messages.",
+  title: "Wayfarer — AI trip planner",
+  description: "A LangGraph Deep Agent that plans feasible day-by-day city itineraries: opening hours, walking times, meals and budget all checked.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${display.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">{children}</body>
     </html>

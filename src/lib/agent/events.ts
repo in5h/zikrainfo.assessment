@@ -7,7 +7,7 @@ export type AgentEvent =
   | { type: "tool_result"; id: string; name: string; content: string; subagent: boolean }
   | { type: "todos"; todos: Todo[] }
   | { type: "files"; files: Record<string, StoredFile> }
-  | { type: "work_order_saved" }
+  | { type: "trip_saved" }
   | { type: "done" }
   | { type: "error"; message: string };
 
