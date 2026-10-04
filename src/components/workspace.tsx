@@ -1,87 +1,92 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Briefcase, Database, FileText, FolderOpen, LayoutList, Play, ScanSearch, ThumbsDown, ThumbsUp, Pause } from "lucide-react";
+import { Building2, Database, FolderOpen, Inbox, KanbanSquare, Mail, MessageSquare, Monitor, Play, Wrench } from "lucide-react";
 
-import { AddCandidateDialog } from "@/components/add-candidate-dialog";
 import { AgentPanel, type AgentPanelHandle } from "@/components/agent-panel";
-import { REC_STYLE, ScorecardView } from "@/components/scorecard-view";
+import { NewRequestDialog } from "@/components/new-request-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { STATUS_LABEL, URGENCY_STYLE, WorkOrderCard, timeLeft } from "@/components/work-order-card";
 import type { TranscriptEntry } from "@/lib/agent/events";
-import type { Candidate, Job, Scorecard, Stage, StoredFile, Todo } from "@/lib/data/types";
+import type {
+  Landlord,
+  MaintenanceRequest,
+  RequestStatus,
+  StoredFile,
+  Todo,
+  Unit,
+  Urgency,
+  Vendor,
+  WorkOrder,
+} from "@/lib/data/types";
 import { cn } from "@/lib/utils";
 
 type Status = { storage: "supabase" | "memory"; llmConfigured: boolean; model: string; subagentModel: string };
+type InboxData = { landlord: Landlord; requests: MaintenanceRequest[]; units: Unit[]; vendors: Vendor[]; workOrders: WorkOrder[] };
 type Detail = {
-  candidate: Candidate;
-  scorecard: Scorecard | null;
+  request: MaintenanceRequest;
+  unit: Unit | null;
+  workOrders: WorkOrder[];
   transcript: TranscriptEntry[];
   files: Record<string, StoredFile>;
   todos: Todo[];
 };
 
-const STAGE_STYLE: Record<Stage, string> = {
-  new: "bg-slate-500/15 text-slate-700 dark:text-slate-300",
-  screened: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
-  advance: "bg-emerald-600/15 text-emerald-700 dark:text-emerald-400",
-  hold: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
-  reject: "bg-red-600/15 text-red-700 dark:text-red-400",
+const REQ_STATUS: Record<RequestStatus, { label: string; cls: string }> = {
+  new: { label: "New", cls: "bg-blue-500/15 text-blue-700 dark:text-blue-300" },
+  triaged: { label: "Ready to send", cls: "bg-violet-500/15 text-violet-700 dark:text-violet-300" },
+  awaiting_tenant: { label: "Waiting on tenant", cls: "bg-slate-500/15 text-slate-700 dark:text-slate-300" },
+  needs_approval: { label: "Needs approval", cls: "bg-amber-500/15 text-amber-700 dark:text-amber-400" },
+  dispatched: { label: "Dispatched", cls: "bg-emerald-600/15 text-emerald-700 dark:text-emerald-400" },
+  resolved: { label: "Resolved", cls: "bg-muted text-muted-foreground" },
 };
 
-function StageBadge({ stage }: { stage: Stage }) {
-  return <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium capitalize", STAGE_STYLE[stage])}>{stage}</span>;
+const CHANNEL_ICON = { sms: MessageSquare, email: Mail, portal: Monitor };
+const RANK: Record<Urgency, number> = { emergency: 0, urgent: 1, routine: 2 };
+const BOARD = "__board__";
+
+function ago(iso: string) {
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60_000);
+  if (m < 60) return `${m}m ago`;
+  if (m < 48 * 60) return `${Math.round(m / 60)}h ago`;
+  return `${Math.round(m / 1440)}d ago`;
 }
 
-const PIPELINE = "__pipeline__";
+function topUrgency(orders: WorkOrder[]): Urgency | null {
+  return orders.reduce<Urgency | null>((best, w) => (best === null || RANK[w.urgency] < RANK[best] ? w.urgency : best), null);
+}
 
 export function Workspace() {
   const [status, setStatus] = useState<Status | null>(null);
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [jobId, setJobId] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [scorecards, setScorecards] = useState<Record<string, Scorecard>>({});
-  const [selected, setSelected] = useState<string>(PIPELINE);
+  const [data, setData] = useState<InboxData | null>(null);
+  const [selected, setSelected] = useState<string>(BOARD);
   const [detail, setDetail] = useState<Detail | null>(null);
   const [files, setFiles] = useState<Record<string, StoredFile>>({});
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState("scorecard");
+  const [tab, setTab] = useState("work");
   const [loadError, setLoadError] = useState<string | null>(null);
   const panel = useRef<AgentPanelHandle>(null);
 
-  const job = useMemo(() => jobs.find((j) => j.id === jobId) ?? null, [jobs, jobId]);
+  const loadInbox = useCallback(async () => {
+    const d = await fetch("/api/inbox").then((r) => r.json());
+    if (d.error) throw new Error(d.error);
+    setData(d);
+  }, []);
 
   useEffect(() => {
     fetch("/api/status").then((r) => r.json()).then(setStatus).catch(() => {});
-    fetch("/api/jobs")
+    fetch("/api/inbox")
       .then((r) => r.json())
-      .then((d) => {
-        if (d.error) throw new Error(d.error);
-        setJobs(d.jobs);
-        if (d.jobs[0]) {
-          setJobId(d.jobs[0].id);
-          return fetch(`/api/jobs/${d.jobs[0].id}/candidates`)
-            .then((r) => r.json())
-            .then((p) => {
-              setCandidates(p.candidates ?? []);
-              setScorecards(p.scorecards ?? {});
-            });
-        }
-      })
+      .then((d) => (d.error ? setLoadError(d.error) : setData(d)))
       .catch((e) => setLoadError(e.message));
   }, []);
 
-  const loadPipeline = useCallback(async (id: string) => {
-    const d = await fetch(`/api/jobs/${id}/candidates`).then((r) => r.json());
-    setCandidates(d.candidates ?? []);
-    setScorecards(d.scorecards ?? {});
-  }, []);
-
   const loadDetail = useCallback(async (id: string) => {
-    const d = await fetch(`/api/candidates/${id}`).then((r) => r.json());
+    const d = await fetch(`/api/requests/${id}`).then((r) => r.json());
     setDetail(d);
     setFiles(d.files ?? {});
   }, []);
@@ -91,50 +96,58 @@ export function Workspace() {
       setSelected(id);
       setDetail(null);
       setFiles({});
-      setTab("scorecard");
-      if (id !== PIPELINE) loadDetail(id);
+      setTab("work");
+      if (id !== BOARD) loadDetail(id);
     },
     [loadDetail]
   );
 
-  const selectJob = useCallback(
-    (id: string) => {
-      setJobId(id);
-      select(PIPELINE);
-      loadPipeline(id);
-    },
-    [select, loadPipeline]
-  );
-
   const refresh = useCallback(() => {
-    if (jobId) loadPipeline(jobId);
-    if (selected !== PIPELINE)
-      fetch(`/api/candidates/${selected}`)
+    loadInbox().catch(() => {});
+    if (selected !== BOARD)
+      fetch(`/api/requests/${selected}`)
         .then((r) => r.json())
-        .then((d) => setDetail((prev) => (prev ? { ...prev, candidate: d.candidate, scorecard: d.scorecard } : prev)));
-  }, [jobId, selected, loadPipeline]);
+        .then((d) => setDetail((prev) => (prev ? { ...prev, request: d.request, workOrders: d.workOrders } : prev)));
+  }, [selected, loadInbox]);
 
-  async function setStage(stage: Stage) {
-    if (selected === PIPELINE) return;
-    await fetch(`/api/candidates/${selected}`, {
+  async function setWorkOrderStatus(id: string, s: "dispatched" | "resolved") {
+    await fetch(`/api/work-orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stage }),
+      body: JSON.stringify({ status: s }),
     });
     refresh();
   }
 
-  const ranked = useMemo(
+  const unitOf = useCallback((id: string) => data?.units.find((u) => u.id === id) ?? null, [data]);
+  const vendorOf = useCallback((id: string | null) => data?.vendors.find((v) => v.id === id) ?? null, [data]);
+
+  // Inbox: untriaged first (newest), then by urgency of their work orders.
+  const inbox = useMemo(() => {
+    if (!data) return [];
+    return data.requests
+      .map((r) => {
+        const orders = data.workOrders.filter((w) => w.request_id === r.id);
+        return { r, orders, urgency: topUrgency(orders) };
+      })
+      .sort((a, b) => {
+        const ra = a.r.status === "resolved" ? 9 : a.urgency ? RANK[a.urgency] + 1 : 0;
+        const rb = b.r.status === "resolved" ? 9 : b.urgency ? RANK[b.urgency] + 1 : 0;
+        return ra - rb || b.r.received_at.localeCompare(a.r.received_at);
+      });
+  }, [data]);
+
+  const openOrders = useMemo(
     () =>
-      [...candidates].sort(
-        (a, b) => (scorecards[b.id]?.overall_score ?? -1) - (scorecards[a.id]?.overall_score ?? -1)
-      ),
-    [candidates, scorecards]
+      (data?.workOrders ?? [])
+        .filter((w) => w.status !== "resolved" && data?.requests.some((r) => r.id === w.request_id))
+        .sort((a, b) => a.respond_by.localeCompare(b.respond_by)),
+    [data]
   );
+  const untriaged = data?.requests.filter((r) => r.status === "new").length ?? 0;
 
   const disabledReason =
     status && !status.llmConfigured ? "ANTHROPIC_API_KEY is not set on the server — the agent is disabled." : undefined;
-
   const workspaceFiles = Object.entries(files).filter(([p]) => !p.startsWith("/skills/"));
 
   if (loadError) {
@@ -147,33 +160,22 @@ export function Workspace() {
     );
   }
 
+  const unit = detail?.unit ?? null;
+
   return (
     <div className="flex min-h-dvh flex-col lg:h-dvh">
-      {/* Header */}
       <header className="flex flex-wrap items-center gap-3 border-b px-4 py-2.5">
         <div className="flex items-center gap-2">
           <div className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <ScanSearch className="size-4" />
+            <Wrench className="size-4" />
           </div>
           <div className="leading-tight">
-            <div className="text-sm font-semibold">ScreenPilot</div>
-            <div className="text-[11px] text-muted-foreground">Evidence-based resume screening agent</div>
+            <div className="text-sm font-semibold">FixDesk</div>
+            <div className="text-[11px] text-muted-foreground">Maintenance triage agent{data ? ` · ${data.landlord.name}` : ""}</div>
           </div>
         </div>
-        <div className="flex max-w-full gap-1 overflow-x-auto lg:ml-4">
-          {jobs.map((j) => (
-            <Button
-              key={j.id}
-              size="sm"
-              variant={j.id === jobId ? "secondary" : "ghost"}
-              onClick={() => selectJob(j.id)}
-              disabled={busy}
-            >
-              <Briefcase /> {j.title}
-            </Button>
-          ))}
-        </div>
         <div className="ml-auto hidden items-center gap-2 md:flex">
+          {data && <Badge variant="outline">Approval limit ${data.landlord.approval_limit}</Badge>}
           {status && (
             <>
               <Badge variant="outline" className="gap-1">
@@ -185,56 +187,60 @@ export function Workspace() {
         </div>
       </header>
 
-      <div className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[260px_minmax(0,1fr)_420px]">
-        {/* Pipeline sidebar */}
-        <aside className="flex max-h-72 flex-col border-b lg:max-h-none lg:min-h-0 lg:border-r lg:border-b-0">
+      <div className="grid flex-1 grid-cols-1 lg:min-h-0 lg:grid-cols-[290px_minmax(0,1fr)_420px]">
+        {/* Inbox */}
+        <aside className="flex max-h-80 flex-col border-b lg:max-h-none lg:min-h-0 lg:border-r lg:border-b-0">
           <div className="space-y-2 p-3">
             <button
               type="button"
-              onClick={() => select(PIPELINE)}
+              onClick={() => select(BOARD)}
               disabled={busy}
               className={cn(
                 "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm hover:bg-accent",
-                selected === PIPELINE && "bg-accent font-medium"
+                selected === BOARD && "bg-accent font-medium"
               )}
             >
-              <LayoutList className="size-4" /> Pipeline overview
+              <KanbanSquare className="size-4" /> Today&apos;s board
+              {untriaged > 0 && <span className="ml-auto rounded-full bg-blue-600 px-1.5 text-[11px] text-white">{untriaged} new</span>}
             </button>
-            {jobId && (
-              <AddCandidateDialog
-                jobId={jobId}
-                onCreated={(c) => {
-                  loadPipeline(jobId);
-                  select(c.id);
-                }}
-              />
-            )}
+            {data && <NewRequestDialog units={data.units} onCreated={(r) => loadInbox().then(() => select(r.id))} />}
           </div>
-          <div className="px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
-            Candidates ({candidates.length})
+          <div className="flex items-center gap-1.5 px-3 pb-1 text-[11px] font-medium tracking-wide text-muted-foreground uppercase">
+            <Inbox className="size-3" /> Inbox ({data?.requests.length ?? 0})
           </div>
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-3">
-            {candidates.length === 0 && !jobId && <Skeleton className="h-12" />}
-            {candidates.map((c) => {
-              const s = scorecards[c.id];
+            {!data && <Skeleton className="h-16" />}
+            {inbox.map(({ r, urgency }) => {
+              const u = unitOf(r.unit_id);
+              const Icon = CHANNEL_ICON[r.channel];
               return (
                 <button
-                  key={c.id}
+                  key={r.id}
                   type="button"
                   disabled={busy}
-                  onClick={() => select(c.id)}
+                  onClick={() => select(r.id)}
                   className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-accent disabled:opacity-60",
-                    selected === c.id && "bg-accent"
+                    "relative w-full rounded-md py-2 pr-2.5 pl-3.5 text-left hover:bg-accent disabled:opacity-60",
+                    selected === r.id && "bg-accent",
+                    r.status === "resolved" && "opacity-60"
                   )}
                 >
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium">{c.name}</div>
-                    <div className="truncate text-xs text-muted-foreground">{c.headline}</div>
+                  {urgency && <span className={cn("absolute top-2 bottom-2 left-1 w-1 rounded", URGENCY_STYLE[urgency].bar)} />}
+                  <div className="flex items-center gap-1.5">
+                    <Icon className="size-3 text-muted-foreground" />
+                    <span className="truncate text-sm font-medium">
+                      {u ? `${u.property_name} ${u.unit_label}` : r.unit_id}
+                    </span>
+                    <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{ago(r.received_at)}</span>
                   </div>
-                  <div className="flex flex-col items-end gap-1">
-                    {s && <span className="text-xs font-semibold tabular-nums">{Math.round(s.overall_score)}</span>}
-                    <StageBadge stage={c.stage} />
+                  <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{r.message}</div>
+                  <div className="mt-1 flex gap-1">
+                    <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", REQ_STATUS[r.status].cls)}>
+                      {REQ_STATUS[r.status].label}
+                    </span>
+                    {urgency && (
+                      <span className="rounded border px-1.5 py-0.5 text-[10px] font-medium">{URGENCY_STYLE[urgency].label}</span>
+                    )}
                   </div>
                 </button>
               );
@@ -244,89 +250,78 @@ export function Workspace() {
 
         {/* Main */}
         <main className="lg:min-h-0 lg:overflow-y-auto">
-          {selected === PIPELINE ? (
-            <div className="mx-auto max-w-3xl space-y-4 p-4 lg:p-6">
-              {job ? (
-                <>
-                  <div>
-                    <h1 className="text-xl font-semibold">{job.title}</h1>
-                    <p className="text-sm text-muted-foreground">
-                      {job.company} · {job.team} · {job.location} · {job.comp_range}
-                    </p>
-                    <p className="mt-2 text-sm">{job.summary}</p>
-                  </div>
-                  <Card className="gap-3">
-                    <CardHeader>
-                      <CardTitle className="text-base">Hiring manager rubric</CardTitle>
-                      <CardDescription>
-                        The agent scores each criterion 0–4 with verbatim evidence. Weights and must-haves drive the
-                        recommendation deterministically.
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <table className="w-full text-sm">
-                        <tbody className="divide-y">
-                          {job.criteria.map((c) => (
-                            <tr key={c.id} className="align-top">
-                              <td className="py-2 pr-3">
-                                <div className="font-medium">{c.label}</div>
-                                <div className="text-xs text-muted-foreground">{c.signals}</div>
-                              </td>
-                              <td className="py-2 text-right whitespace-nowrap">
-                                <span className="text-xs text-muted-foreground">weight {c.weight}</span>
-                                {c.must_have && (
-                                  <Badge variant="outline" className="ml-2 text-[10px]">
-                                    must-have
-                                  </Badge>
-                                )}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </CardContent>
-                  </Card>
-                  <Card className="gap-3">
-                    <CardHeader>
-                      <CardTitle className="text-base">Ranked pipeline</CardTitle>
-                      <CardDescription>Select a candidate to screen them, or ask the agent to compare.</CardDescription>
-                    </CardHeader>
-                    <CardContent className="divide-y">
-                      {ranked.map((c) => {
-                        const s = scorecards[c.id];
-                        return (
-                          <button
-                            key={c.id}
-                            type="button"
-                            onClick={() => select(c.id)}
-                            disabled={busy}
-                            className="flex w-full items-center gap-3 py-2.5 text-left hover:opacity-80"
-                          >
-                            <span className="w-10 text-lg font-semibold tabular-nums">
-                              {s ? Math.round(s.overall_score) : "—"}
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-medium">{c.name}</div>
-                              <div className="truncate text-xs text-muted-foreground">
-                                {s ? s.summary : "Not screened yet"}
+          {selected === BOARD ? (
+            <div className="mx-auto max-w-4xl space-y-4 p-4 lg:p-6">
+              <div>
+                <h1 className="text-xl font-semibold">Today&apos;s board</h1>
+                <p className="text-sm text-muted-foreground">
+                  {untriaged} request{untriaged === 1 ? "" : "s"} waiting for triage · {openOrders.length} open work order
+                  {openOrders.length === 1 ? "" : "s"}. Open a request and click <b>Triage with agent</b>.
+                </p>
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                {(["emergency", "urgent", "routine"] as const).map((level) => {
+                  const col = openOrders.filter((w) => w.urgency === level);
+                  return (
+                    <div key={level} className="rounded-lg border bg-muted/30">
+                      <div className="flex items-center gap-2 border-b px-3 py-2">
+                        <span className={cn("size-2 rounded-full", URGENCY_STYLE[level].bar)} />
+                        <span className="text-sm font-medium">{URGENCY_STYLE[level].label}</span>
+                        <span className="ml-auto text-xs text-muted-foreground">{col.length}</span>
+                      </div>
+                      <div className="space-y-2 p-2">
+                        {col.length === 0 && <div className="px-1 py-3 text-xs text-muted-foreground">Nothing here.</div>}
+                        {col.map((w) => {
+                          const u = unitOf(w.unit_id);
+                          return (
+                            <button
+                              key={w.id}
+                              type="button"
+                              onClick={() => select(w.request_id)}
+                              className="w-full rounded-md border bg-card p-2.5 text-left text-sm shadow-xs hover:border-primary/40"
+                            >
+                              <div className="font-medium">{w.category}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {u ? `${u.property_name} ${u.unit_label}` : w.unit_id} · {vendorOf(w.vendor_id)?.name ?? "no vendor"}
                               </div>
-                            </div>
-                            {s && <Badge variant={REC_STYLE[s.recommendation].variant}>{REC_STYLE[s.recommendation].label}</Badge>}
-                            <StageBadge stage={c.stage} />
-                          </button>
-                        );
-                      })}
-                    </CardContent>
-                  </Card>
-                </>
-              ) : (
-                <Skeleton className="h-64" />
-              )}
+                              <div className="mt-1.5 flex items-center justify-between text-[11px]">
+                                <span className="rounded bg-muted px-1.5 py-0.5">{STATUS_LABEL[w.status]}</span>
+                                {w.status !== "dispatched" && <span className="text-muted-foreground">{timeLeft(w.respond_by)}</span>}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <Card className="gap-3">
+                <CardHeader>
+                  <CardTitle className="text-base">How triage works</CardTitle>
+                </CardHeader>
+                <CardContent className="grid gap-3 text-sm sm:grid-cols-3">
+                  <div>
+                    <div className="font-medium">1 · Agent reads &amp; quotes</div>
+                    <p className="text-muted-foreground">Splits the message into issues and quotes the tenant word for word as evidence.</p>
+                  </div>
+                  <div>
+                    <div className="font-medium">2 · Rules decide</div>
+                    <p className="text-muted-foreground">
+                      A fixed rule table sets urgency and response time. A keyword safety net can only escalate.
+                    </p>
+                  </div>
+                  <div>
+                    <div className="font-medium">3 · You send</div>
+                    <p className="text-muted-foreground">Drafts are checked and saved. Nothing goes out until you click Send.</p>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           ) : !detail ? (
             <div className="space-y-3 p-6">
               <Skeleton className="h-10 w-1/2" />
-              <Skeleton className="h-40" />
+              <Skeleton className="h-32" />
               <Skeleton className="h-64" />
             </div>
           ) : (
@@ -334,69 +329,123 @@ export function Workspace() {
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
-                    <h1 className="text-xl font-semibold">{detail.candidate.name}</h1>
-                    <StageBadge stage={detail.candidate.stage} />
+                    <h1 className="text-xl font-semibold">
+                      {unit ? `${unit.property_name} · Unit ${unit.unit_label}` : detail.request.unit_id}
+                    </h1>
+                    <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", REQ_STATUS[detail.request.status].cls)}>
+                      {REQ_STATUS[detail.request.status].label}
+                    </span>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {detail.candidate.headline} {detail.candidate.source && `· via ${detail.candidate.source}`}
-                  </p>
+                  {unit && (
+                    <p className="text-sm text-muted-foreground">
+                      {unit.tenant_name} · {unit.tenant_phone} · {unit.address}
+                    </p>
+                  )}
                 </div>
                 <Button
-                  onClick={() => panel.current?.send("Screen this candidate against the job rubric.")}
+                  onClick={() => panel.current?.send("Triage this request.")}
                   disabled={busy || Boolean(disabledReason)}
+                  variant={detail.workOrders.length ? "outline" : "default"}
                 >
-                  <Play /> {detail.scorecard ? "Re-run screen" : "Run AI screen"}
+                  <Play /> {detail.workOrders.length ? "Re-triage" : "Triage with agent"}
                 </Button>
               </div>
 
-              {detail.scorecard && (
-                <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-2.5">
-                  <span className="px-1 text-xs font-medium text-muted-foreground">Your decision:</span>
-                  <Button size="sm" variant={detail.candidate.stage === "advance" ? "default" : "outline"} onClick={() => setStage("advance")}>
-                    <ThumbsUp /> Advance
-                  </Button>
-                  <Button size="sm" variant={detail.candidate.stage === "hold" ? "default" : "outline"} onClick={() => setStage("hold")}>
-                    <Pause /> Hold
-                  </Button>
-                  <Button size="sm" variant={detail.candidate.stage === "reject" ? "default" : "outline"} onClick={() => setStage("reject")}>
-                    <ThumbsDown /> Decline
-                  </Button>
+              <div className="rounded-2xl rounded-tl-sm border bg-card p-4 shadow-xs">
+                <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+                  {(() => {
+                    const Icon = CHANNEL_ICON[detail.request.channel];
+                    return <Icon className="size-3" />;
+                  })()}
+                  {unit?.tenant_name} via {detail.request.channel} · {ago(detail.request.received_at)}
                 </div>
-              )}
+                <p className="text-[15px] leading-relaxed">{detail.request.message}</p>
+              </div>
 
               <Tabs value={tab} onValueChange={setTab}>
                 <TabsList>
-                  <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
-                  <TabsTrigger value="resume">
-                    <FileText /> Resume
+                  <TabsTrigger value="work">
+                    <Wrench /> Work orders {detail.workOrders.length > 0 && `(${detail.workOrders.length})`}
+                  </TabsTrigger>
+                  <TabsTrigger value="unit">
+                    <Building2 /> Unit
                   </TabsTrigger>
                   <TabsTrigger value="files">
                     <FolderOpen /> Agent files {workspaceFiles.length > 0 && `(${workspaceFiles.length})`}
                   </TabsTrigger>
                 </TabsList>
-                <TabsContent value="scorecard" className="mt-2">
-                  {detail.scorecard ? (
-                    <ScorecardView card={detail.scorecard} />
-                  ) : (
+                <TabsContent value="work" className="mt-2 space-y-4">
+                  {detail.workOrders.length === 0 ? (
                     <Card>
                       <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                        {busy ? "The agent is screening — watch its steps on the right." : "Not screened yet. Click “Run AI screen”."}
+                        {busy ? "The agent is triaging. Watch its steps on the right." : "Not triaged yet. Click “Triage with agent”."}
+                      </CardContent>
+                    </Card>
+                  ) : (
+                    detail.workOrders.map((w) => (
+                      <WorkOrderCard
+                        key={w.id}
+                        wo={w}
+                        unit={unit}
+                        vendor={vendorOf(w.vendor_id)}
+                        approvalLimit={data?.landlord.approval_limit ?? 0}
+                        onStatus={(s) => setWorkOrderStatus(w.id, s)}
+                      />
+                    ))
+                  )}
+                </TabsContent>
+                <TabsContent value="unit" className="mt-2">
+                  {unit && (
+                    <Card className="gap-3">
+                      <CardContent className="space-y-3 text-sm">
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">Shutoffs</div>
+                          {unit.shutoffs}
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">Access</div>
+                          {unit.access_notes}
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">Equipment</div>
+                          <ul className="list-disc pl-5">
+                            {unit.appliances.map((a, i) => (
+                              <li key={i}>
+                                {a.type}
+                                {a.fuel && ` (${a.fuel})`}
+                                {a.age_years != null && ` · ${a.age_years} yrs`}
+                                {a.notes && ` · ${a.notes}`}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-muted-foreground">Repair history</div>
+                          {(() => {
+                            const hist = (data?.workOrders ?? []).filter((w) => w.unit_id === unit.id && w.request_id !== detail.request.id);
+                            return hist.length ? (
+                              <ul className="space-y-1">
+                                {hist.map((w) => (
+                                  <li key={w.id} className="text-xs">
+                                    <span className="tabular-nums text-muted-foreground">{w.created_at.slice(0, 10)}</span> · {w.category} ·{" "}
+                                    {w.scope}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">No previous work orders.</p>
+                            );
+                          })()}
+                        </div>
                       </CardContent>
                     </Card>
                   )}
-                </TabsContent>
-                <TabsContent value="resume" className="mt-2">
-                  <Card>
-                    <CardContent>
-                      <pre className="font-sans text-sm leading-relaxed whitespace-pre-wrap">{detail.candidate.resume_text}</pre>
-                    </CardContent>
-                  </Card>
                 </TabsContent>
                 <TabsContent value="files" className="mt-2 space-y-3">
                   {workspaceFiles.length === 0 ? (
                     <Card>
                       <CardContent className="py-8 text-center text-sm text-muted-foreground">
-                        The agent&apos;s virtual filesystem (working notes such as evidence.md) appears here.
+                        The agent&apos;s virtual filesystem (e.g. the owner note) appears here.
                       </CardContent>
                     </Card>
                   ) : (
@@ -419,22 +468,21 @@ export function Workspace() {
 
         {/* Agent */}
         <aside className="flex h-[85dvh] flex-col border-t lg:h-auto lg:min-h-0 lg:border-t-0 lg:border-l">
-          {jobId && (selected === PIPELINE || detail) ? (
+          {data && (selected === BOARD || detail) ? (
             <AgentPanel
-              key={`${jobId}:${selected}`}
+              key={selected}
               ref={panel}
-              jobId={jobId}
-              candidateId={selected === PIPELINE ? null : selected}
-              title={selected === PIPELINE ? `Pipeline · ${job?.title ?? ""}` : `Screening ${detail?.candidate.name}`}
+              requestId={selected === BOARD ? null : selected}
+              title={selected === BOARD ? `Portfolio · ${data.landlord.name}` : `Request from ${unit?.tenant_name ?? ""}`}
               suggestions={
-                selected === PIPELINE
-                  ? ["Who should I interview first, and why?", "Compare the screened candidates on the must-haves"]
-                  : detail?.scorecard
-                    ? ["Explain the lowest-scoring must-have", "Make the email shorter and warmer", "What should I probe in the phone screen?"]
-                    : ["Screen this candidate against the job rubric."]
+                selected === BOARD
+                  ? ["What needs my attention right now?", "Which open jobs need my approval?"]
+                  : detail?.workOrders.length
+                    ? ["Make the tenant text shorter", "Why this urgency?", "Use a cheaper vendor if it's safe to"]
+                    : ["Triage this request."]
               }
-              transcript={selected === PIPELINE ? [] : (detail?.transcript ?? [])}
-              initialTodos={selected === PIPELINE ? [] : (detail?.todos ?? [])}
+              transcript={selected === BOARD ? [] : (detail?.transcript ?? [])}
+              initialTodos={selected === BOARD ? [] : (detail?.todos ?? [])}
               disabledReason={disabledReason}
               onFiles={(f) => setFiles((prev) => ({ ...prev, ...f }))}
               onSaved={refresh}

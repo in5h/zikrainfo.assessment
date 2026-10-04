@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "ScreenPilot — resume screening agent",
-  description: "A LangGraph Deep Agent that screens resumes against a hiring rubric with verified evidence, fairness checks and recruiter-ready outreach.",
+  title: "FixDesk — maintenance triage agent",
+  description: "A LangGraph Deep Agent that triages tenant maintenance requests into safe, well-scoped work orders with vendor dispatch and drafted messages.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

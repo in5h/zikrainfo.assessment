@@ -58,8 +58,7 @@ function Markdown({ text }: { text: string }) {
 
 export function AgentPanel({
   ref,
-  jobId,
-  candidateId,
+  requestId,
   title,
   suggestions,
   transcript,
@@ -71,8 +70,7 @@ export function AgentPanel({
   onBusy,
 }: {
   ref?: Ref<AgentPanelHandle>;
-  jobId: string;
-  candidateId: string | null;
+  requestId: string | null;
   title: string;
   suggestions: string[];
   transcript: TranscriptEntry[];
@@ -116,7 +114,7 @@ export function AgentPanel({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId, candidateId, message }),
+        body: JSON.stringify({ requestId, message }),
       });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -158,7 +156,7 @@ export function AgentPanel({
             case "files":
               onFiles?.(ev.files);
               break;
-            case "scorecard_saved":
+            case "work_order_saved":
               onSaved?.();
               break;
             case "error":
@@ -185,7 +183,7 @@ export function AgentPanel({
       <div className="flex items-center gap-2 border-b px-4 py-3">
         <Bot className="size-4 text-primary" />
         <div className="min-w-0">
-          <div className="text-sm font-semibold">ScreenPilot agent</div>
+          <div className="text-sm font-semibold">FixDesk agent</div>
           <div className="truncate text-xs text-muted-foreground">{title}</div>
         </div>
         {busy && <Loader2 className="ml-auto size-4 animate-spin text-muted-foreground" />}
@@ -220,9 +218,9 @@ export function AgentPanel({
         {items.length === 0 && (
           <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
             <Sparkles className="mb-2 size-4 text-primary" />
-            The agent plans its work, delegates evidence extraction to a subagent, verifies every quote against the
-            resume, scores with the rubric&apos;s weights, runs a fairness check, and saves a scorecard. You make the
-            final call.
+            The agent plans, checks the unit&apos;s repair history with a subagent, classifies urgency against a fixed
+            safety rule table, ranks vendors, drafts the tenant and vendor messages, and saves a work order. Nothing
+            is sent until you click Send.
           </div>
         )}
         {items.map((it, i) =>
@@ -289,7 +287,7 @@ export function AgentPanel({
                 send(input);
               }
             }}
-            placeholder={candidateId ? "Ask about this candidate, or request edits…" : "Ask about the pipeline…"}
+            placeholder={requestId ? "Paste the tenant's reply, or ask for edits…" : "Ask about open maintenance…"}
             className="max-h-32 min-h-10 resize-none"
             disabled={busy || Boolean(disabledReason)}
           />

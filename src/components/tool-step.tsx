@@ -10,12 +10,13 @@ import {
   ClipboardList,
   Database,
   FileText,
+  History,
   ListTodo,
   Loader2,
   Save,
-  Scale,
   ShieldCheck,
-  Users,
+  Siren,
+  Wrench,
   type LucideIcon,
 } from "lucide-react";
 
@@ -31,13 +32,14 @@ export type Step = {
 
 const META: Record<string, { label: string; icon: LucideIcon }> = {
   write_todos: { label: "Updated plan", icon: ListTodo },
-  get_job_requisition: { label: "Read job rubric", icon: ClipboardList },
-  get_candidate_profile: { label: "Read resume", icon: FileText },
-  list_pipeline: { label: "Read pipeline", icon: Users },
-  task: { label: "Delegated to evidence-extractor", icon: Bot },
-  score_candidate: { label: "Scored & verified evidence", icon: Scale },
-  fairness_check: { label: "Fairness check", icon: ShieldCheck },
-  save_scorecard: { label: "Saved scorecard", icon: Save },
+  get_request: { label: "Read request & unit", icon: ClipboardList },
+  get_unit_history: { label: "Read repair history", icon: History },
+  task: { label: "Delegated to history-analyst", icon: Bot },
+  classify_urgency: { label: "Classified urgency", icon: Siren },
+  find_vendors: { label: "Ranked vendors", icon: Wrench },
+  check_message: { label: "Checked message", icon: ShieldCheck },
+  create_work_order: { label: "Saved work order", icon: Save },
+  list_open_work_orders: { label: "Read open work orders", icon: Database },
   read_file: { label: "Read file", icon: BookOpen },
   write_file: { label: "Wrote file", icon: FileText },
   edit_file: { label: "Edited file", icon: FileText },
@@ -59,22 +61,27 @@ function outcome(step: Step): { text: string; tone: "ok" | "warn" } | null {
   const r = parse(step.result);
   const args = (step.args ?? {}) as Record<string, unknown>;
   switch (step.name) {
-    case "score_candidate":
-      return r?.ok
-        ? { text: `${r.overall_score}/100 → ${r.recommendation}`, tone: "ok" }
-        : { text: `${(r?.problems as unknown[] | undefined)?.length ?? "?"} problem(s) — revising`, tone: "warn" };
-    case "fairness_check":
+    case "classify_urgency": {
+      if (!r?.ok) return { text: `${(r?.problems as unknown[] | undefined)?.length ?? "?"} problem(s) — revising`, tone: "warn" };
+      const net = (r.escalated_by_safety_net as string[] | undefined)?.length ? " · safety net escalated" : "";
+      return { text: `${r.urgency} · ${r.respond_within_hours}h${net}`, tone: "ok" };
+    }
+    case "find_vendors": {
+      const v = (r?.vendors as { name: string }[] | undefined) ?? [];
+      return v.length ? { text: `${v.length} eligible · top: ${v[0].name}`, tone: "ok" } : { text: "none eligible", tone: "warn" };
+    }
+    case "check_message":
       return r?.clean
-        ? { text: "clean", tone: "ok" }
+        ? { text: `${args.audience} message clean`, tone: "ok" }
         : { text: `${(r?.flags as unknown[] | undefined)?.length ?? "?"} flag(s) — rewriting`, tone: "warn" };
-    case "save_scorecard":
-      return r?.saved ? { text: "saved to pipeline", tone: "ok" } : { text: "refused — fixing", tone: "warn" };
+    case "create_work_order":
+      return r?.saved ? { text: `${r.urgency} · ${r.status}`, tone: "ok" } : { text: "refused — fixing", tone: "warn" };
     case "read_file":
     case "write_file":
     case "edit_file":
       return { text: String(args.file_path ?? args.path ?? ""), tone: "ok" };
     case "task":
-      return { text: "evidence returned", tone: "ok" };
+      return { text: "history returned", tone: "ok" };
     default:
       return step.result.startsWith("Error") ? { text: "error", tone: "warn" } : null;
   }

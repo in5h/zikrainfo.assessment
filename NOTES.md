@@ -1,72 +1,81 @@
-# Submission note: ScreenPilot
+# Submission note: FixDesk
 
 ## The problem
 
-A recruiter on a busy technical req reads 100–300 resumes per opening. First-pass screening has three recurring problems:
+Most US rentals are owned by small landlords: people with a handful of units and no property manager. They handle maintenance from their phone, usually in the evening. A tenant texts *"I smell rotten eggs near the stove"* or *"water is spreading across the floor"*, and the landlord has to work out, quickly and correctly:
 
-1. **It's slow.** Each resume takes 5–10 minutes against a rubric, and longer if you also write a note and an email.
-2. **It's inconsistent.** Different recruiters, or the same recruiter at 9am and at 6pm, weigh criteria differently. Hiring managers get "seems strong" with no evidence attached.
-3. **It's risky.** Generic LLM chat makes this worse. It paraphrases or invents experience ("led a team of 40"), and it happily picks up on age, family status or career gaps.
+- **How urgent is this?** A gas smell means get out now. A dripping faucet can wait a week.
+- **What should the tenant do right now?** Shut off the water, and where is the valve? Leave the unit?
+- **Who should I send, and what will it cost?** Is it within what I'd approve without thinking?
+- **What do I say?** Without admitting liability, promising rent credits, or entering without notice.
 
-ScreenPilot does one workflow: **screen one resume against a hiring manager's weighted rubric and produce a scorecard a human can trust.** That means quote-backed scores, a deterministic recommendation, an interview plan aimed at the gaps, and a draft email. The recruiter makes the decision.
+Getting this wrong is expensive (water damage, safety incidents, disputes). Getting it slowly is stressful. A generic chatbot is risky here: it can sound confident while under-calling an emergency or inventing details.
+
+FixDesk does one workflow well: **tenant message in → safe, well-scoped work order with drafted messages out.** The owner reviews and sends.
 
 ## How the harness is designed
 
-It's built on **LangGraph Deep Agents** (`createDeepAgent`, JS), running inside Next.js route handlers on Vercel.
+It's built on **LangGraph Deep Agents** (`createDeepAgent`, JS), running in Next.js route handlers on Vercel.
 
 | Harness piece | What it does here | Why |
 |---|---|---|
-| **Planning** (`write_todos`) | The agent plans the screen, and the plan streams live into the UI | Makes long multi-step runs legible and keeps the model on the workflow |
-| **Skills** (`/skills/*/SKILL.md`) | `structured-screening` (0–4 anchors, evidence rules, bands), `fair-hiring` (EEO guardrails), `candidate-outreach` (email playbook) | Domain knowledge is loaded on demand, so the base prompt stays small. Recruiting leads can edit a skill without touching code |
-| **Subagent** `evidence-extractor` | Reads the resume against the rubric in an isolated context and returns verbatim quotes per criterion (cheaper model, low effort) | Keeps the main context clean and splits "find evidence" from "judge evidence" |
-| **Virtual filesystem** | The agent writes working notes (e.g. `/workspace/<id>/evidence.md`). These persist per thread and show up in the "Agent files" tab | Gives the agent scratch memory and makes its work auditable |
-| **Custom tools (6)** | `get_job_requisition`, `get_candidate_profile`, `list_pipeline`, `score_candidate`, `fairness_check`, `save_scorecard` | See below |
+| **Planning** (`write_todos`) | The agent plans the triage, and the plan streams live into the UI | Keeps a 10-step workflow on track and makes it visible |
+| **Skills** (`/skills/*/SKILL.md`) | `maintenance-triage` (hazards, rule table, follow-up questions, repeat-issue heuristics) and `tenant-communication` (message structure, entry notice, liability, Fair Housing, vendor dispatch format) | Domain knowledge loads on demand, so the base prompt stays small. An owner could edit their own playbook |
+| **Subagent** `history-analyst` | Reviews the unit's past work orders and equipment ages in an isolated context (cheaper model, low effort) | Finds patterns like "third no-heat call on a 17-year-old furnace" without filling the main context |
+| **Virtual filesystem** | The agent writes an owner note per request (`/workspace/<id>/owner-note.md`). It persists with the thread and shows in "Agent files" | Gives the agent working memory and an audit trail |
+| **Custom tools (7)** | `get_request`, `get_unit_history`, `classify_urgency`, `find_vendors`, `check_message`, `create_work_order`, `list_open_work_orders` | See below |
 
-The important design choice: **the LLM proposes and code decides.**
+The important design choice: **the LLM reads and writes, and code decides anything safety- or money-related.**
 
-- `score_candidate` checks every evidence quote verbatim against the resume (after normalising whitespace, case and dashes). It rejects scores of 2 or more that have no verified quote. It computes the weighted 0–100 score and maps it to *advance / hold / reject* using fixed thresholds and must-have gaps. The model fixes problems and retries; in the UI you see "2 problems — revising" and then a pass.
-- `fairness_check` lints the agent's *own* writing for protected characteristics and their proxies (age, graduation year, family status, gender, national origin, health, career-gap penalties, "culture fit"). It avoids domain false positives such as "Visa" the card network, "race condition" and "foreign key".
-- `save_scorecard` **re-runs both checks on the server** and refuses to persist if either fails. A prompt injection or a sloppy model run can't save an ungrounded or biased scorecard.
-- The agent only *recommends*. It sets the candidate to `screened`. Advance, Hold and Decline are human buttons.
+- **`classify_urgency`.** The model proposes hazards for each issue, backed by *verbatim quotes* from the tenant. Code checks the quotes against the message, then applies a fixed rule table that sets urgency, response window and trade (gas, CO, fire, active leak, sparking, sewage = emergency). A **keyword safety net** escalates on phrases like "rotten eggs", "sparked" or "spreading across the floor" even if the model missed them. It can only raise urgency, never lower it. The tool also returns the tenant safety steps, built from the unit's real shutoff locations.
+- **`find_vendors`.** Code filters vendors by trade, service area and 24/7 availability (for emergencies), ranks them, and estimates cost from the callout fee and typical hours, with an after-hours multiplier for emergencies.
+- **Approval rule.** Non-emergencies estimated above the owner's limit ($400 in the demo) need approval. Emergencies are never blocked on approval, because life safety and protecting the property come first.
+- **`check_message`.** Lints drafts for admitting fault or promising reimbursement, rent-credit promises, guarantees, blaming the tenant, Fair Housing issues, and tenant emails leaking to vendors.
+- **`create_work_order`.** **Re-runs all of the above on the server** and refuses to save if:
+  - the urgency would be downgraded,
+  - the vendor isn't eligible,
+  - an emergency tenant message is missing its required safety instruction (e.g. no "shut off" for a leak, no "leave" for gas),
+  - either message fails the lint.
 
-**Persistence (Supabase).** `jobs`, `candidates`, `scorecards`, and `threads`. A thread stores the serialized LangChain messages plus the agent's virtual filesystem and todos, so a conversation picks up where it left off after a reload or a cold start. History is append-only, which preserves prompt caching and thinking blocks. RLS is on with no public policies, and all access goes through server routes.
+  The model fixes the problem and retries, and you can watch that happen in the UI.
+- **Human in control.** The agent saves drafts. **Send now** / **Approve & send** / **Mark resolved** are the owner's buttons.
 
-**Streaming.** `/api/chat` streams NDJSON events: tokens, tool calls and results (subagent calls are tagged), todos and file updates. The UI renders each tool call as an expandable step showing its input and output, so the harness is visible rather than a black box.
+**Persistence (Supabase).** `landlords`, `units`, `vendors`, `requests`, `work_orders`, and `threads`. A thread stores the serialized LangChain messages plus the agent's virtual filesystem and todos, so a request's conversation resumes after a reload or a cold start. History is append-only, which keeps prompt caching effective. RLS is on with no public policies, and all access goes through server routes.
 
-**Models.** The main agent runs Claude Opus 5.5 with adaptive thinking at effort `medium`. The subagent runs Claude Sonnet 5.5 at effort `low`. Both are configurable by environment variable.
+**Streaming.** `/api/chat` streams NDJSON events: tokens, tool calls and results (subagent calls are tagged), todos and file updates. Each tool call renders as an expandable step showing its input and output, so you can see exactly what the harness did.
+
+**Models.** The main agent runs Claude Opus 5.5 at effort `medium`. The history subagent runs Claude Sonnet 5.5 at effort `low`. Both are configurable.
 
 ## What it does (user flow)
 
-1. Pick a job. You see the hiring manager's rubric (weights and must-haves) and a ranked pipeline.
-2. Pick a candidate (or paste a new resume) and click **Run AI screen**.
-3. Watch the plan, the subagent delegation, quote verification, the fairness lint and the save, all live.
-4. Review the scorecard: per-criterion pips with quoted evidence, strengths, gaps, an interview plan and a draft email you can copy.
-5. Decide: Advance, Hold or Decline. Follow up in chat ("make the email shorter", "explain the payments score"). Edits are re-linted and re-saved.
-6. Ask at the pipeline level: "Who should I interview first?"
+1. **Today's board** shows open work orders in Emergency / Urgent / Routine columns with respond-by countdowns. The inbox shows untriaged requests first.
+2. Open a request and click **Triage with agent**. Watch the plan, the history check, the classification (including the safety net), vendor ranking, message checks and the save.
+3. Review the work order: urgency banner, safety steps, why (the rules that fired), vendor and estimate, approval status, scope, and the tenant/vendor drafts ready to copy.
+4. Click **Send now** (emergency) or **Approve & send**, then **Mark resolved** later.
+5. Follow up in chat: paste the tenant's answer to the agent's questions, ask for a shorter text, or ask "what needs my attention right now?".
 
 ## Testing
 
-`npm run smoke` runs a full screening turn **offline**. It uses the real graph, tools, subagent and repo, with a scripted model in place of Claude. It asserts that:
+`npm run smoke` runs a full triage **offline**. It uses the real graph, tools, subagent and repo, with a scripted model standing in for Claude, and unit-tests the rules engine. There are 27 assertions, among them:
 
-- a fabricated quote is rejected,
-- biased text is flagged,
-- subagent events stream,
-- todos stream,
-- the scorecard is persisted with the right band,
-- the stage changes,
-- the thread state is saved.
+- fabricated evidence is rejected,
+- the safety net turns an under-called "drip" into an emergency leak,
+- non-24/7 vendors are excluded from emergencies,
+- a work order without shutoff instructions is refused,
+- gas, heat and vague-message rules behave as specified,
+- state persists.
 
-I also checked the UI at desktop and mobile widths with Playwright.
+I also checked the UI with Playwright at desktop and mobile widths.
 
 ## How long it took
 
-_[Fill in your actual time]_. Rough split: scoping and domain design · harness and tools · Supabase and persistence · UI · deploy, testing and write-up.
+_[Fill in your actual time]_. Rough split: scoping and domain rules · harness and tools · Supabase and persistence · UI · deploy, testing and write-up.
 
 ## What I'd build next
 
-1. **PDF/DOCX resume upload** using Supabase Storage and text extraction, plus an ATS import (Greenhouse/Lever webhooks).
-2. **Batch screening.** Fan out across a whole req with async subagents, then a calibration view showing the score distribution and outliers.
-3. **Human-in-the-loop approval** on `save_scorecard` and email sending (LangGraph `interruptOn` with a Postgres checkpointer), plus an actual send through Gmail or Outlook.
-4. **Rubric builder.** Turn a raw job description into a weighted rubric with a hiring manager review step.
-5. **Evals.** A labelled set of resume and rubric pairs with expected bands, scoring drift tracking across model and prompt changes, plus adverse-impact monitoring across the pipeline.
-6. **Auth and multi-tenant orgs** (Supabase Auth + RLS by org), an audit log of every agent decision, and LangSmith tracing in production.
+1. **Real channels.** Receive tenant SMS through Twilio, send the approved messages, and parse the vendor's reply into an ETA.
+2. **Photos.** Tenants attach a photo, and a vision model adds evidence (e.g. a water stain spreading on the ceiling).
+3. **Human-in-the-loop interrupts** with a Postgres checkpointer, so approval happens mid-run (LangGraph `interruptOn`).
+4. **Local rules.** Notice-of-entry hours and habitability timelines per state or city as a skill the owner selects, plus a tenant-facing safety FAQ.
+5. **Evals.** A labelled set of tenant messages with expected urgency (especially tricky phrasings of emergencies), tracked across model and prompt changes. Under-triage would be the key metric.
+6. **Multi-owner auth** (Supabase Auth + RLS by landlord), vendor portal links, and LangSmith tracing in production.

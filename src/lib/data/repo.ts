@@ -1,8 +1,8 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-import { seedCandidates, seedJobs } from "./seed";
-import type { Candidate, Job, Scorecard, Stage, Thread } from "./types";
+import { LANDLORD, seedHistory, seedRequests, seedUnits, seedVendors } from "./seed";
+import type { Landlord, MaintenanceRequest, RequestStatus, Thread, Unit, Vendor, WorkOrder, WorkOrderStatus } from "./types";
 
 /**
  * Persistence layer. Uses Supabase when SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
@@ -11,86 +11,105 @@ import type { Candidate, Job, Scorecard, Stage, Thread } from "./types";
  */
 export interface Repo {
   kind: "supabase" | "memory";
-  listJobs(): Promise<Job[]>;
-  getJob(id: string): Promise<Job | null>;
-  listCandidates(jobId: string): Promise<Candidate[]>;
-  getCandidate(id: string): Promise<Candidate | null>;
-  createCandidate(c: Omit<Candidate, "created_at" | "stage">): Promise<Candidate>;
-  setStage(candidateId: string, stage: Stage): Promise<void>;
-  latestScorecard(candidateId: string): Promise<Scorecard | null>;
-  latestScorecardsForJob(jobId: string): Promise<Record<string, Scorecard>>;
-  saveScorecard(s: Omit<Scorecard, "id" | "created_at">): Promise<Scorecard>;
+  landlord(): Promise<Landlord>;
+  listUnits(): Promise<Unit[]>;
+  getUnit(id: string): Promise<Unit | null>;
+  listVendors(): Promise<Vendor[]>;
+  listRequests(): Promise<MaintenanceRequest[]>;
+  getRequest(id: string): Promise<MaintenanceRequest | null>;
+  createRequest(r: Omit<MaintenanceRequest, "status" | "received_at">): Promise<MaintenanceRequest>;
+  setRequestStatus(id: string, status: RequestStatus): Promise<void>;
+  listWorkOrders(filter?: { request_id?: string; unit_id?: string }): Promise<WorkOrder[]>;
+  saveWorkOrder(w: Omit<WorkOrder, "id" | "created_at"> & { id?: string }): Promise<WorkOrder>;
+  setWorkOrderStatus(id: string, status: WorkOrderStatus): Promise<WorkOrder | null>;
   getThread(id: string): Promise<Thread | null>;
   saveThread(t: Omit<Thread, "updated_at">): Promise<void>;
 }
 
+const byNewest = <T extends { created_at?: string; received_at?: string }>(a: T, b: T) =>
+  (b.created_at ?? b.received_at ?? "").localeCompare(a.created_at ?? a.received_at ?? "");
+
 // ---------------------------------------------------------------- memory ----
 
 type MemoryState = {
-  jobs: Job[];
-  candidates: Candidate[];
-  scorecards: Scorecard[];
+  units: Unit[];
+  vendors: Vendor[];
+  requests: MaintenanceRequest[];
+  workOrders: WorkOrder[];
   threads: Map<string, Thread>;
 };
 
-const g = globalThis as unknown as { __screenpilotMemory?: MemoryState };
+const g = globalThis as unknown as { __fixdeskMemory?: MemoryState };
 
-function memoryState(): MemoryState {
-  if (!g.__screenpilotMemory) {
-    g.__screenpilotMemory = {
-      jobs: seedJobs(),
-      candidates: seedCandidates(),
-      scorecards: [],
-      threads: new Map(),
-    };
-  }
-  return g.__screenpilotMemory;
+function mem(): MemoryState {
+  g.__fixdeskMemory ??= {
+    units: seedUnits(),
+    vendors: seedVendors(),
+    requests: seedRequests(),
+    workOrders: seedHistory(),
+    threads: new Map(),
+  };
+  return g.__fixdeskMemory;
 }
 
 const memoryRepo: Repo = {
   kind: "memory",
-  async listJobs() {
-    return memoryState().jobs;
+  async landlord() {
+    return LANDLORD;
   },
-  async getJob(id) {
-    return memoryState().jobs.find((j) => j.id === id) ?? null;
+  async listUnits() {
+    return mem().units;
   },
-  async listCandidates(jobId) {
-    return memoryState()
-      .candidates.filter((c) => c.job_id === jobId)
-      .sort((a, b) => b.created_at.localeCompare(a.created_at));
+  async getUnit(id) {
+    return mem().units.find((u) => u.id === id) ?? null;
   },
-  async getCandidate(id) {
-    return memoryState().candidates.find((c) => c.id === id) ?? null;
+  async listVendors() {
+    return mem().vendors;
   },
-  async createCandidate(c) {
-    const row: Candidate = { ...c, stage: "new", created_at: new Date().toISOString() };
-    memoryState().candidates.push(row);
+  async listRequests() {
+    return [...mem().requests].sort(byNewest);
+  },
+  async getRequest(id) {
+    return mem().requests.find((r) => r.id === id) ?? null;
+  },
+  async createRequest(r) {
+    const row: MaintenanceRequest = { ...r, status: "new", received_at: new Date().toISOString() };
+    mem().requests.push(row);
     return row;
   },
-  async setStage(candidateId, stage) {
-    const c = memoryState().candidates.find((x) => x.id === candidateId);
-    if (c) c.stage = stage;
+  async setRequestStatus(id, status) {
+    const r = mem().requests.find((x) => x.id === id);
+    if (r) r.status = status;
   },
-  async latestScorecard(candidateId) {
-    const all = memoryState().scorecards.filter((s) => s.candidate_id === candidateId);
-    return all.at(-1) ?? null;
+  async listWorkOrders(filter = {}) {
+    return mem()
+      .workOrders.filter(
+        (w) => (!filter.request_id || w.request_id === filter.request_id) && (!filter.unit_id || w.unit_id === filter.unit_id)
+      )
+      .sort(byNewest);
   },
-  async latestScorecardsForJob(jobId) {
-    const out: Record<string, Scorecard> = {};
-    for (const s of memoryState().scorecards) if (s.job_id === jobId) out[s.candidate_id] = s;
-    return out;
-  },
-  async saveScorecard(s) {
-    const row: Scorecard = { ...s, id: crypto.randomUUID(), created_at: new Date().toISOString() };
-    memoryState().scorecards.push(row);
+  async saveWorkOrder(w) {
+    const state = mem();
+    const existing = w.id ? state.workOrders.find((x) => x.id === w.id) : undefined;
+    if (existing) {
+      Object.assign(existing, w);
+      return existing;
+    }
+    const row: WorkOrder = { ...w, id: w.id ?? `wo-${crypto.randomUUID().slice(0, 8)}`, created_at: new Date().toISOString() };
+    state.workOrders.push(row);
     return row;
+  },
+  async setWorkOrderStatus(id, status) {
+    const w = mem().workOrders.find((x) => x.id === id);
+    if (!w) return null;
+    w.status = status;
+    return w;
   },
   async getThread(id) {
-    return memoryState().threads.get(id) ?? null;
+    return mem().threads.get(id) ?? null;
   },
   async saveThread(t) {
-    memoryState().threads.set(t.id, { ...t, updated_at: new Date().toISOString() });
+    mem().threads.set(t.id, { ...t, updated_at: new Date().toISOString() });
   },
 };
 
@@ -101,71 +120,82 @@ function must<T>(res: { data: T; error: { message: string } | null }): T {
   return res.data;
 }
 
+const num = (w: WorkOrder): WorkOrder => ({
+  ...w,
+  estimate_low: Number(w.estimate_low),
+  estimate_high: Number(w.estimate_high),
+  respond_within_hours: Number(w.respond_within_hours),
+});
+
 function supabaseRepo(db: SupabaseClient): Repo {
   let seeded: Promise<void> | null = null;
-  // First request against an empty project seeds the demo jobs + candidates,
-  // so reviewers never land on a blank screen.
+  // The first request against an empty project seeds the demo portfolio, so
+  // reviewers never land on a blank inbox.
   const ensureSeeded = () =>
     (seeded ??= (async () => {
-      const { count, error } = await db.from("jobs").select("id", { count: "exact", head: true });
+      const { count, error } = await db.from("units").select("id", { count: "exact", head: true });
       if (error) throw new Error(`Supabase: ${error.message}`);
       if ((count ?? 0) > 0) return;
-      must(await db.from("jobs").upsert(seedJobs()));
-      must(await db.from("candidates").upsert(seedCandidates()));
+      must(await db.from("landlords").upsert(LANDLORD));
+      must(await db.from("units").upsert(seedUnits()));
+      must(await db.from("vendors").upsert(seedVendors()));
+      must(await db.from("requests").upsert(seedRequests()));
+      must(await db.from("work_orders").upsert(seedHistory()));
     })().catch((e) => {
       seeded = null;
       throw e;
     }));
 
-  const num = (s: Scorecard) => ({ ...s, overall_score: Number(s.overall_score) });
-
   return {
     kind: "supabase",
-    async listJobs() {
+    async landlord() {
       await ensureSeeded();
-      return must(await db.from("jobs").select("*").order("created_at")) as Job[];
+      const row = must(await db.from("landlords").select("*").limit(1).maybeSingle()) as Landlord | null;
+      return row ? { ...row, approval_limit: Number(row.approval_limit) } : LANDLORD;
     },
-    async getJob(id) {
+    async listUnits() {
       await ensureSeeded();
-      return must(await db.from("jobs").select("*").eq("id", id).maybeSingle()) as Job | null;
+      return must(await db.from("units").select("*").order("id")) as Unit[];
     },
-    async listCandidates(jobId) {
+    async getUnit(id) {
+      return must(await db.from("units").select("*").eq("id", id).maybeSingle()) as Unit | null;
+    },
+    async listVendors() {
       await ensureSeeded();
-      return must(
-        await db.from("candidates").select("*").eq("job_id", jobId).order("created_at", { ascending: false })
-      ) as Candidate[];
+      return (must(await db.from("vendors").select("*")) as Vendor[]).map((v) => ({
+        ...v,
+        callout_fee: Number(v.callout_fee),
+        hourly_rate: Number(v.hourly_rate),
+        rating: Number(v.rating),
+      }));
     },
-    async getCandidate(id) {
-      return must(await db.from("candidates").select("*").eq("id", id).maybeSingle()) as Candidate | null;
+    async listRequests() {
+      await ensureSeeded();
+      return must(await db.from("requests").select("*").order("received_at", { ascending: false })) as MaintenanceRequest[];
     },
-    async createCandidate(c) {
-      return must(await db.from("candidates").insert({ ...c, stage: "new" }).select("*").single()) as Candidate;
+    async getRequest(id) {
+      return must(await db.from("requests").select("*").eq("id", id).maybeSingle()) as MaintenanceRequest | null;
     },
-    async setStage(candidateId, stage) {
-      must(await db.from("candidates").update({ stage }).eq("id", candidateId));
+    async createRequest(r) {
+      return must(await db.from("requests").insert({ ...r, status: "new" }).select("*").single()) as MaintenanceRequest;
     },
-    async latestScorecard(candidateId) {
-      const row = must(
-        await db
-          .from("scorecards")
-          .select("*")
-          .eq("candidate_id", candidateId)
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle()
-      ) as Scorecard | null;
+    async setRequestStatus(id, status) {
+      must(await db.from("requests").update({ status }).eq("id", id));
+    },
+    async listWorkOrders(filter = {}) {
+      await ensureSeeded();
+      let q = db.from("work_orders").select("*");
+      if (filter.request_id) q = q.eq("request_id", filter.request_id);
+      if (filter.unit_id) q = q.eq("unit_id", filter.unit_id);
+      return (must(await q.order("created_at", { ascending: false })) as WorkOrder[]).map(num);
+    },
+    async saveWorkOrder(w) {
+      const row = { ...w, id: w.id ?? `wo-${crypto.randomUUID().slice(0, 8)}` };
+      return num(must(await db.from("work_orders").upsert(row).select("*").single()) as WorkOrder);
+    },
+    async setWorkOrderStatus(id, status) {
+      const row = must(await db.from("work_orders").update({ status }).eq("id", id).select("*").maybeSingle()) as WorkOrder | null;
       return row ? num(row) : null;
-    },
-    async latestScorecardsForJob(jobId) {
-      const rows = must(
-        await db.from("scorecards").select("*").eq("job_id", jobId).order("created_at", { ascending: true })
-      ) as Scorecard[];
-      const out: Record<string, Scorecard> = {};
-      for (const s of rows) out[s.candidate_id] = num(s);
-      return out;
-    },
-    async saveScorecard(s) {
-      return num(must(await db.from("scorecards").insert(s).select("*").single()) as Scorecard);
     },
     async getThread(id) {
       return must(await db.from("threads").select("*").eq("id", id).maybeSingle()) as Thread | null;

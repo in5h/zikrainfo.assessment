@@ -23,8 +23,8 @@ export type { AgentEvent };
 
 export const CONTEXT_PREFIX = "[context]";
 
-export function contextLine(jobId: string, candidateId: string | null) {
-  return `${CONTEXT_PREFIX} job_id=${jobId}${candidateId ? ` candidate_id=${candidateId}` : ""}`;
+export function contextLine(requestId: string | null) {
+  return `${CONTEXT_PREFIX} ${requestId ? `request_id=${requestId}` : "portfolio view (no specific request)"} now=${new Date().toISOString()}`;
 }
 
 export function textOf(content: BaseMessage["content"]): string {
@@ -38,21 +38,20 @@ const truncate = (s: string, n = 4000) => (s.length > n ? `${s.slice(0, n)}\n…
 
 type RunArgs = {
   threadId: string;
-  jobId: string;
-  candidateId: string | null;
+  requestId: string | null;
   message: string;
   /** Test seams: inject models (defaults to Claude via ChatAnthropic). */
   model?: BaseChatModel;
   subagentModel?: BaseChatModel;
 };
 
-export async function* runTurn({ threadId, jobId, candidateId, message, model, subagentModel }: RunArgs): AsyncGenerator<AgentEvent> {
+export async function* runTurn({ threadId, requestId, message, model, subagentModel }: RunArgs): AsyncGenerator<AgentEvent> {
   const repo = getRepo();
   const existing = await repo.getThread(threadId);
   const history = existing ? mapStoredMessagesToChatMessages(existing.messages as StoredMessage[]) : [];
   const workspace = existing?.files ?? {};
 
-  const human = new HumanMessage(`${contextLine(jobId, candidateId)}\n${message}`);
+  const human = new HumanMessage(`${contextLine(requestId)}\n${message}`);
   const agent = buildAgent({ model, subagentModel });
 
   let finalMessages: BaseMessage[] = [...history, human];
@@ -112,7 +111,7 @@ export async function* runTurn({ threadId, jobId, candidateId, message, model, s
             const name = m.name ?? toolNames.get(m.tool_call_id) ?? "tool";
             const content = textOf(m.content);
             yield { type: "tool_result", id: m.tool_call_id, name, content: truncate(content), subagent };
-            if (name === "save_scorecard" && content.includes('"saved": true')) yield { type: "scorecard_saved" };
+            if (name === "create_work_order" && content.includes('"saved": true')) yield { type: "work_order_saved" };
           }
         }
         if (root && u.todos) yield { type: "todos", todos: u.todos };
@@ -137,8 +136,7 @@ export async function* runTurn({ threadId, jobId, candidateId, message, model, s
     await repo
       .saveThread({
         id: threadId,
-        job_id: jobId,
-        candidate_id: candidateId,
+        request_id: requestId,
         messages: mapChatMessagesToStoredMessages(finalMessages),
         files,
         todos: finalTodos,
@@ -148,7 +146,7 @@ export async function* runTurn({ threadId, jobId, candidateId, message, model, s
   yield { type: "done" };
 }
 
-/** Thread → UI-friendly transcript (used when reopening a candidate). */
+/** Thread → UI-friendly transcript (used when reopening a request). */
 export function transcript(stored: unknown[]) {
   const msgs = mapStoredMessagesToChatMessages(stored as StoredMessage[]);
   const out: TranscriptEntry[] = [];

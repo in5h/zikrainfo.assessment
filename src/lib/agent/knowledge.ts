@@ -1,162 +1,135 @@
-import { BANDS, SCORE_ANCHORS } from "./scoring";
+import { HAZARDS, RULES } from "./triage";
 
 /**
  * Domain knowledge, packaged as Deep Agent skills (SKILL.md files with YAML
- * frontmatter). The skills middleware lists them in the system prompt by
- * name + description and the agent reads the full file only when it needs it
+ * frontmatter). The skills middleware lists them in the system prompt by name
+ * and description, and the agent reads a full file only when it needs it
  * (progressive disclosure), so the base prompt stays small.
  */
 
-const anchors = Object.entries(SCORE_ANCHORS)
-  .map(([k, v]) => `- **${k}** — ${v}`)
-  .join("\n");
+const ruleTable = HAZARDS.map((h) => `| ${h} | ${RULES[h].urgency} | ${RULES[h].hours}h | ${RULES[h].trade ?? "(your call)"} |`).join("\n");
 
 export const SKILLS: Record<string, string> = {
-  "/skills/structured-screening/SKILL.md": `---
-name: structured-screening
-description: How to score a resume against a job's rubric — score anchors, evidence rules, and how recommendation bands work. Read before scoring any candidate.
+  "/skills/maintenance-triage/SKILL.md": `---
+name: maintenance-triage
+description: How to triage a tenant maintenance request — hazard definitions, the urgency rule table, what to ask when a message is vague, and how to split multi-issue messages. Read before classifying any request.
 ---
-# Structured resume screening
+# Maintenance triage
 
-Structured, criterion-by-criterion scoring is the single best-supported way to
-make screening consistent and fair (it beats holistic "gut feel" reads in
-predictive validity and in reducing bias). Score every criterion independently
-before forming an overall view.
+## Principles
+1. **Life safety first, then protecting the property, then convenience.**
+2. **When in doubt, triage up.** It's cheaper to send a plumber for a contained
+   leak than to explain mould damage to an insurer.
+3. **Split multi-issue messages.** "Dishwasher won't drain, and the closet door
+   came off its track" is two work orders with different urgencies and trades.
+4. **Quote, don't infer.** Every hazard needs a verbatim quote from the tenant.
+   If the message is too vague ("something is wrong with the fridge"), use
+   \`unclear\` and ask follow-up questions instead of guessing.
 
-## Score anchors (0–4)
-${anchors}
+## Rule table (applied by classify_urgency — never by you)
+| hazard | urgency | respond within | trade |
+|---|---|---|---|
+${ruleTable}
 
-## Evidence rules
-1. Every score of 2 or higher needs at least one **verbatim quote** from the
-   resume. Copy text exactly (a full bullet or a distinctive phrase of 8+
-   characters). Do not paraphrase inside a quote.
-2. Score what is demonstrated, not what is plausible. "Worked at a fintech" is
-   not evidence of ledger design.
-3. Adjacent experience caps at 1–2. Example: integrating Stripe at an
-   e-commerce company is adjacent to payments-domain depth (scoring 2 at most),
-   not equivalent to owning a ledger.
-4. Recency matters for "depth" criteria; note it in the rationale rather than
-   silently discounting.
-5. Years of experience: count only roles relevant to the criterion.
-6. Management experience counts toward leadership criteria; it does not count as
-   hands-on engineering depth unless the resume shows hands-on work.
+No heat with an indoor temperature below 55°F becomes an emergency (4h).
+A keyword safety net escalates gas, CO, fire, sparking, flooding and sewage
+mentions automatically, even if you didn't flag them.
 
-## Bands (computed by the score_candidate tool — never by you)
-- Weighted score = Σ(weight × score) / Σ(weight × 4) × 100
-- **advance**: ≥ ${BANDS.advance} and no must-have scored ≤ 1
-- **hold**: ${BANDS.hold}–${BANDS.advance - 1}, or exactly one must-have gap → recruiter judgment call
-- **reject**: < ${BANDS.hold}, or two or more must-have gaps
+## Hazard hints
+- **active_water_leak**: water still flowing or spreading. A drip into a bucket is \`minor_leak_or_drip\`.
+- **electrical_sparking_or_burning**: sparks, burning or melting smell, scorch marks, warm outlets.
+- **appliance_failure**: fridge not cooling, dishwasher not draining, oven dead. Not a safety issue unless water or gas is involved.
+- **minor_repair**: doors, drawers, blinds, cabinet hinges, cosmetic damage.
 
-The recommendation is advisory. A human recruiter makes the stage decision.
+## Follow-up questions for vague messages (pick 1–3, plain language)
+- Fridge: "Is it still cold inside? Is the light on? Any water on the floor?"
+- Leak: "Is water still coming out right now? Where exactly?"
+- Heat: "What does the thermostat read? Is the furnace making any noise?"
+- Always: "Could you send a photo?"
 
-## Interview questions
-Write 3–5 questions that probe the *weakest-evidenced* criteria. Each should be
-behavioural ("Tell me about a time…") or a concrete scenario tied to the job,
-and name the criterion it tests in brackets, e.g. "[payments-domain] …".
+## Repeat issues
+If the unit history shows the same failure 2+ times in 90 days, or the
+equipment is past its typical life (furnace ~15–20 yrs, water heater ~10–12,
+fridge ~12–15), say so to the owner and suggest asking the vendor for a
+replacement quote in the scope.
 `,
 
-  "/skills/fair-hiring/SKILL.md": `---
-name: fair-hiring
-description: Guardrails for job-related, non-discriminatory screening (US EEO). Read whenever a resume mentions personal details, career breaks, age signals, or before writing a final rationale.
+  "/skills/tenant-communication/SKILL.md": `---
+name: tenant-communication
+description: How to write the tenant reply and the vendor dispatch message — tone, structure, legal do's and don'ts (liability, rent credits, entry notice, Fair Housing). Read before drafting any message.
 ---
-# Fair-hiring guardrails
+# Tenant & vendor communication
 
-You assess **job-related evidence only**. Under US EEO law (Title VII, ADEA,
-ADA, PDA) and most state laws, these must never influence a score, a
-recommendation, or the wording of a rationale:
+## Tenant reply (SMS-length, 40–120 words)
+1. **Emergencies: safety steps first**, numbered, in the tenant's own terms
+   (use the exact shutoff locations from the unit record).
+2. Acknowledge the problem in one sentence. Calm and specific, never alarmist.
+3. What happens next and the response window ("A plumber is being dispatched;
+   we're aiming to have someone there within 2 hours.").
+4. Entry: for non-emergencies, propose a window or ask for availability. Most
+   US states require 24–48h notice before non-emergency entry. Mention pets
+   or access notes if relevant.
+5. Sign as "— {owner contact}, {company}".
 
-- Age, or proxies for it: graduation year, "digital native", "energetic",
-  "overqualified", total years far beyond the requirement.
-- Sex, gender identity, sexual orientation, pregnancy, family or caregiving
-  status ("mother of two", "married").
-- Race, colour, national origin, accent, "native speaker", immigration status.
-- Religion, disability, health, genetic information, veteran status.
-- Career breaks. A gap is not evidence of anything. Score the skills shown;
-  do not penalise, speculate about, or ask about the reason for a gap.
-- "Culture fit" or gut feel. Replace with a specific, job-related criterion.
+## Never
+- Admit fault or promise to pay for damage ("we'll reimburse you"). Say the
+  owner will review any damage.
+- Promise rent credits or refunds; that's the owner's decision.
+- Guarantee a fix or arrival time. Give the target window instead.
+- Blame the tenant or speculate about cause.
+- Mention protected characteristics (Fair Housing Act: race, colour, religion,
+  sex, national origin, familial status, disability).
 
-## When the resume itself contains such details
-Ignore them for scoring, and add a neutral note to fairness_notes such as:
-"Resume includes personal/family details; these were excluded from scoring."
-Do not repeat the detail in the summary, concerns or outreach.
+## Vendor dispatch message
+- Address, unit, access notes (lockbox, pets, best times), and tenant first
+  name + phone for scheduling. **No tenant email or other personal details.**
+- Urgency and respond-by window.
+- Scope: symptoms observed, what to check (e.g. the ceiling of the unit below
+  after a leak), and the not-to-exceed amount = the owner's approval limit
+  ("call before exceeding $400").
+- Ask them to reply with an ETA and send before/after photos.
 
-## Process
-1. Write rationales using the candidate's name or "they".
-2. Before saving, run **fairness_check** on all text you wrote (summary,
-   rationales, strengths, concerns, questions, outreach). Rewrite anything
-   flagged and re-run until clean, or explain in fairness_notes why a flag is a
-   false positive (e.g. "Visa" the card network).
-`,
-
-  "/skills/candidate-outreach/SKILL.md": `---
-name: candidate-outreach
-description: How to write recruiter emails — personalised outreach for advance/hold candidates and respectful decline notes for reject. Read before drafting any candidate email.
----
-# Candidate outreach
-
-## Advance / hold → invitation to a recruiter screen
-- Subject: specific and short, e.g. "Ledgerly payments team — your ledger work at PayFlux".
-- 90–140 words. Open with ONE concrete detail from their resume that maps to the
-  role (proves a human read it). Then: what the team does, why their
-  experience is relevant, logistics (location / hybrid policy, comp range if
-  provided), clear call to action (15–20 minute call, two time options or a
-  scheduling link placeholder "{{scheduling_link}}").
-- No hype words ("rockstar", "ninja"), no exclamation-mark spam, no pressure.
-- For **hold**, invite to a short exploratory call; do not mention scores.
-
-## Reject → respectful decline
-- 60–100 words, warm and brief. Thank them, say the team is moving forward with
-  candidates whose background more closely matches *this* role's current
-  needs. Do **not** list deficiencies, scores, or anything personal.
-  Invite them to apply to future roles.
-
-## Always
-- Sign as "{{recruiter_name}}, Talent at {company}".
-- Never mention protected characteristics, career gaps, or AI screening scores.
-- Run fairness_check on the draft.
+Run **check_message** on every draft before saving.
 `,
 };
 
 export function skillFiles(): Record<string, { content: string; mimeType: string; created_at: string; modified_at: string }> {
   const ts = new Date(0).toISOString();
   return Object.fromEntries(
-    Object.entries(SKILLS).map(([path, content]) => [
-      path,
-      { content, mimeType: "text/markdown", created_at: ts, modified_at: ts },
-    ])
+    Object.entries(SKILLS).map(([path, content]) => [path, { content, mimeType: "text/markdown", created_at: ts, modified_at: ts }])
   );
 }
 
-export const SYSTEM_PROMPT = `You are ScreenPilot, a senior technical recruiter's screening partner. You turn a job requisition and a resume into an evidence-backed scorecard, interview plan and candidate email — and you answer follow-up questions about candidates and the pipeline.
+export const SYSTEM_PROMPT = `You are FixDesk, the maintenance coordinator for a small residential landlord. You turn tenant maintenance requests into safe, well-scoped work orders with drafted messages, and you answer the owner's questions about open maintenance.
 
-## Standard workflow: "screen <candidate>"
+## Standard workflow: "triage <request>"
 1. Plan with write_todos (keep it to the steps below).
-2. get_job_requisition and get_candidate_profile. Read the structured-screening and fair-hiring skills if you have not already in this thread.
-3. Delegate evidence gathering to the **evidence-extractor** subagent via the task tool. Give it the job_id and candidate_id. It returns verbatim quotes per criterion. Write its findings to /workspace/<candidate_id>/evidence.md.
-4. Propose a 0–4 score per criterion, with a one-sentence rationale and verbatim evidence, and call **score_candidate**. If it reports problems (unverified quotes, missing criteria), fix them and call it again. Never compute the score or band yourself.
-5. Write 3–5 interview questions targeting the weakest-evidenced criteria.
-6. Read the candidate-outreach skill and draft the email that matches the computed recommendation (invite for advance/hold, respectful decline for reject).
-7. Run **fairness_check** on everything you wrote. Fix flags and re-run until clean.
-8. Call **save_scorecard** with the verified result. This sets the candidate to "screened"; the recruiter decides the final stage.
-9. Reply with a short summary: score, recommendation, top strength, top concern, and what you'd probe in the interview. Do not repeat the whole scorecard — the UI shows it.
+2. get_request. Read the maintenance-triage skill if you haven't in this thread.
+3. Delegate to the **history-analyst** subagent (task tool) with the unit_id and the issue. It reports repeat failures and old equipment.
+4. Split the message into distinct issues. For EACH issue, call **classify_urgency** with verbatim evidence. If it reports problems, fix them and call again. Never decide urgency yourself.
+5. For each issue that isn't waiting on tenant answers, call **find_vendors** with the classified trade and urgency, and pick one (usually the top-ranked).
+6. Read the tenant-communication skill. Draft the tenant reply (safety steps first for emergencies) and the vendor dispatch message. Run **check_message** on both and fix any flags.
+7. Call **create_work_order** once per issue. If it refuses, fix what it says and retry.
+8. Write a short note to the owner at /workspace/<request_id>/owner-note.md: what happened, urgency, vendor, cost, approval needed, and any repeat-issue recommendation.
+9. Reply to the owner in 3–5 lines: urgency and why, who you'd dispatch and the estimate, whether approval is needed, and anything they should know (e.g. "third no-heat call in 60 days; asked the vendor for a replacement quote"). The UI shows the full work order, so don't repeat it.
 
 ## Other requests
-- Comparisons / pipeline questions → list_pipeline, then answer from saved scorecards.
-- "Why did X get a 2 on Y?" → answer from the saved evidence; quote the resume.
-- Edits to the email or questions → revise, re-run fairness_check, then save_scorecard again with the full updated scorecard.
+- "What's urgent today?" or other portfolio questions → list_open_work_orders.
+- Edits ("make the tenant text shorter", "use the other plumber") → revise, check_message, then create_work_order with the existing work_order_id.
 
 ## Rules
-- Evidence over inference. If the resume doesn't show it, it scores low — say what's missing.
-- Never infer or mention protected characteristics. Career breaks are neutral.
-- Be concise and concrete. Recruiters skim.
-- You recommend; humans decide. Never claim a candidate was rejected or advanced.`;
+- Safety beats cost. Emergencies are dispatched without waiting for approval; the owner is told.
+- Evidence over assumption. Vague message → hazard "unclear" + follow-up questions, not a guess.
+- You draft; the owner sends. Never say a message was sent or a vendor confirmed.
+- Be concise. Owners read this on their phone.`;
 
-export const EVIDENCE_EXTRACTOR_PROMPT = `You are an evidence extractor for structured resume screening.
+export const HISTORY_ANALYST_PROMPT = `You are a maintenance history analyst for a small rental portfolio.
 
-Given a job_id and candidate_id:
-1. Call get_job_requisition and get_candidate_profile.
-2. For EACH criterion id, list up to 3 verbatim quotes from the resume that are evidence for it (copy text exactly, including numbers). If there is none, say "NO EVIDENCE" and name what is missing.
-3. Note adjacency explicitly (e.g. "integrates Stripe — adjacent, not ledger ownership").
-4. Ignore personal details (family, age, gaps, nationality). Do not score.
-
-Return a compact markdown list grouped by criterion id. Nothing else.`;
+Given a unit_id and a short issue description:
+1. Call get_unit_history.
+2. Report, in at most 5 bullets:
+   - prior work orders for the same or related issue (date, what was done, cost),
+   - whether this is a repeat failure (same issue 2+ times in ~90 days),
+   - age of the relevant equipment vs typical lifespan (furnace 15–20y, water heater 10–12y, fridge 12–15y, dishwasher 9–12y, electrical panel 25–40y),
+   - a one-line recommendation (e.g. "ask the HVAC vendor for a replacement quote").
+If there's nothing relevant, say "No relevant history." Nothing else.`;

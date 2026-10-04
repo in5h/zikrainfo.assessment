@@ -1,65 +1,85 @@
-export type Criterion = {
-  id: string;
-  label: string;
-  /** What "good" looks like, written by the hiring manager. */
-  signals: string;
-  weight: number;
-  must_have: boolean;
-};
+export const TRADES = ["plumbing", "electrical", "hvac", "gas", "appliance", "locksmith", "general", "pest"] as const;
+export type Trade = (typeof TRADES)[number];
 
-export type Job = {
-  id: string;
-  title: string;
-  company: string;
-  team: string;
-  location: string;
-  comp_range: string;
-  summary: string;
-  criteria: Criterion[];
-  created_at: string;
-};
+export const URGENCIES = ["emergency", "urgent", "routine"] as const;
+export type Urgency = (typeof URGENCIES)[number];
 
-export const STAGES = ["new", "screened", "advance", "hold", "reject"] as const;
-export type Stage = (typeof STAGES)[number];
-
-export type Candidate = {
+export type Landlord = {
   id: string;
-  job_id: string;
   name: string;
-  email: string | null;
-  headline: string | null;
-  source: string | null;
-  resume_text: string;
-  stage: Stage;
+  contact_name: string;
+  /** Work orders estimated above this need the owner's approval before dispatch. */
+  approval_limit: number;
+};
+
+export type Appliance = { type: string; fuel?: string; age_years?: number; notes?: string };
+
+export type Unit = {
+  id: string;
+  property_name: string;
+  address: string;
+  unit_label: string;
+  tenant_name: string;
+  tenant_phone: string;
+  tenant_email: string;
+  appliances: Appliance[];
+  /** Where to shut off water / gas / power — given to tenants in emergencies. */
+  shutoffs: string;
+  access_notes: string;
   created_at: string;
 };
 
-export type Recommendation = "advance" | "hold" | "reject";
-
-export type CriterionScore = {
-  criterion_id: string;
-  label: string;
-  score: number;
-  weight: number;
-  must_have: boolean;
-  rationale: string;
-  evidence: string[];
+export type Vendor = {
+  id: string;
+  name: string;
+  trades: Trade[];
+  phone: string;
+  emergency_available: boolean;
+  callout_fee: number;
+  hourly_rate: number;
+  rating: number;
+  preferred: boolean;
+  /** Property names this vendor covers. */
+  service_area: string[];
+  notes: string;
 };
 
-export type Scorecard = {
+export const REQUEST_STATUSES = ["new", "triaged", "awaiting_tenant", "needs_approval", "dispatched", "resolved"] as const;
+export type RequestStatus = (typeof REQUEST_STATUSES)[number];
+
+export type MaintenanceRequest = {
   id: string;
-  candidate_id: string;
-  job_id: string;
-  overall_score: number;
-  recommendation: Recommendation;
-  summary: string;
-  criteria: CriterionScore[];
-  strengths: string[];
-  concerns: string[];
-  interview_questions: string[];
-  outreach_subject: string | null;
-  outreach_body: string | null;
-  fairness_notes: string[];
+  unit_id: string;
+  channel: "sms" | "email" | "portal";
+  message: string;
+  received_at: string;
+  status: RequestStatus;
+};
+
+export const WORK_ORDER_STATUSES = ["ready", "awaiting_tenant", "needs_approval", "dispatched", "resolved"] as const;
+export type WorkOrderStatus = (typeof WORK_ORDER_STATUSES)[number];
+
+export type WorkOrder = {
+  id: string;
+  request_id: string;
+  unit_id: string;
+  vendor_id: string | null;
+  category: string;
+  trade: Trade;
+  urgency: Urgency;
+  respond_within_hours: number;
+  respond_by: string;
+  hazards: string[];
+  rationale: string;
+  safety_steps: string[];
+  scope: string;
+  followup_questions: string[];
+  estimate_low: number;
+  estimate_high: number;
+  needs_approval: boolean;
+  tenant_message: string;
+  vendor_message: string | null;
+  status: WorkOrderStatus;
   created_at: string;
 };
 
@@ -69,9 +89,8 @@ export type Todo = { content: string; status: "pending" | "in_progress" | "compl
 
 export type Thread = {
   id: string;
-  candidate_id: string | null;
-  job_id: string;
-  /** LangChain StoredMessage[] — serialized so the agent can resume with full history. */
+  request_id: string | null;
+  /** LangChain StoredMessage[], serialized so the agent can resume with full history. */
   messages: unknown[];
   files: Record<string, StoredFile>;
   todos: Todo[];
