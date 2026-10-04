@@ -64,8 +64,12 @@ const memoryRepo: Repo = {
 
 // -------------------------------------------------------------- supabase ----
 
-function must<T>(res: { data: T; error: { message: string } | null }): T {
-  if (res.error) throw new Error(`Supabase: ${res.error.message}`);
+function must<T>(res: { data: T; error: { message: string; details?: string; hint?: string } | null }): T {
+  if (res.error) {
+    // Network failures come back with an empty message; include details so the cause is visible.
+    const { message, details, hint } = res.error;
+    throw new Error(`Supabase: ${[message, details, hint].filter(Boolean).join(" · ") || "request failed (check SUPABASE_URL and network)"}`);
+  }
   return res.data;
 }
 
@@ -78,7 +82,7 @@ function supabaseRepo(db: SupabaseClient): Repo {
   const ensureSeeded = () =>
     (seeded ??= (async () => {
       const { count, error } = await db.from("places").select("id", { count: "exact", head: true });
-      if (error) throw new Error(`Supabase: ${error.message}`);
+      if (error) must({ data: null, error });
       if ((count ?? 0) > 0) return;
       must(await db.from("cities").upsert(CITIES));
       must(await db.from("places").upsert(seedPlaces()));
