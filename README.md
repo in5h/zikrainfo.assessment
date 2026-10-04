@@ -101,13 +101,14 @@ npm run build
 2. Leave every setting as it is. **Don't add any environment variables.**
 3. Click **Deploy**. In about 2 minutes you get a public link such as `https://your-project.vercel.app`.
 
-With no keys, the app runs in **demo mode** (offline planner) and **saves each visitor's trips in their own browser** (localStorage). The browser sends its trip along with every request, so it works across Vercel's stateless serverless instances. Both are optional upgrades:
+Out of the box the app uses the **built-in demo Supabase project** (`src/lib/config.ts`) through Supabase's public anon key. Row-level-security policies (`supabase/migrations/0002_demo_access.sql`) make the catalog read-only and let the app read and write demo trips. Planning runs in **demo mode** (offline planner). Optional overrides:
 
-| Add this env var in Vercel | What changes |
+| Env var | What changes |
 |---|---|
 | `ANTHROPIC_API_KEY` | Claude plans trips and answers free-form chat |
-| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` (and run `supabase/migrations/0001_init.sql`) | Trips are stored in Postgres instead of the browser |
+| `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` | Use your own Supabase project with the secret server key (run both migrations + `supabase/seed.sql`) |
+| `WAYFARER_STORAGE=memory` | No database: each visitor's trips are kept in their browser and sent with every request |
 
-Security: RLS is on for every table with no public policies. All data access goes through server routes using the service-role key.
+Security: RLS is on for every table. All data access goes through server routes. The demo project's anon policies allow reading and writing demo trips (no personal data). For a locked-down deployment, drop `0002_demo_access.sql` and use `SUPABASE_SERVICE_ROLE_KEY`.
 
 _Sample data: coordinates, opening hours and prices are simplified typical values for the demo. Verify before travelling._

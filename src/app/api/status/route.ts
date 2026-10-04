@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { MAIN_MODEL, SUBAGENT_MODEL } from "@/lib/agent/agent";
+import { MAIN_MODEL, SUBAGENT_MODEL } from "@/lib/config";
 import { getRepo } from "@/lib/data/repo";
+import { handle } from "@/lib/server/handle";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = handle(async () => {
   const claude = Boolean(process.env.ANTHROPIC_API_KEY);
   return NextResponse.json({
     // "browser" = no database configured: each visitor's trips live in their own browser.
@@ -15,4 +16,4 @@ export async function GET() {
     model: claude ? MAIN_MODEL : "offline planner",
     subagentModel: claude ? SUBAGENT_MODEL : "offline planner",
   });
-}
+});

@@ -1,13 +1,15 @@
 import "server-only";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import { supabaseConfig } from "@/lib/config";
+
 import { CITIES, seedPlaces } from "./seed";
 import type { City, Place, Thread, Trip } from "./types";
 
 /**
- * Persistence layer. Uses Supabase when SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
- * are set; otherwise falls back to an in-process store so the app runs locally
- * with zero setup. The interface is identical either way.
+ * Persistence layer. Uses Supabase (the built-in demo project by default; see
+ * lib/config.ts), or an in-process store when WAYFARER_STORAGE=memory. The
+ * interface is identical either way.
  */
 export interface Repo {
   kind: "supabase" | "memory";
@@ -132,11 +134,7 @@ let cached: Repo | null = null;
 
 export function getRepo(): Repo {
   if (cached) return cached;
-  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  cached =
-    url && key
-      ? supabaseRepo(createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } }))
-      : memoryRepo;
+  const cfg = supabaseConfig();
+  cached = cfg ? supabaseRepo(createClient(cfg.url, cfg.key, { auth: { persistSession: false, autoRefreshToken: false } })) : memoryRepo;
   return cached;
 }

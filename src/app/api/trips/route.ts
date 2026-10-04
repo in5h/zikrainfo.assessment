@@ -3,16 +3,17 @@ import { z } from "zod";
 
 import { getRepo } from "@/lib/data/repo";
 import { INTERESTS, PACES } from "@/lib/data/types";
+import { handle } from "@/lib/server/handle";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export const GET = handle(async () => {
   try {
     return NextResponse.json({ trips: await getRepo().listTrips() });
   } catch (e) {
     return NextResponse.json({ error: (e as Error).message }, { status: 500 });
   }
-}
+});
 
 const body = z.object({
   city_id: z.string().min(1),
@@ -24,7 +25,7 @@ const body = z.object({
   notes: z.string().max(500).default(""),
 });
 
-export async function POST(req: Request) {
+export const POST = handle(async (req: Request) => {
   const parsed = body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.issues.map((i) => i.message).join("; ") }, { status: 400 });
@@ -46,4 +47,4 @@ export async function POST(req: Request) {
     updated_at: now,
   });
   return NextResponse.json({ trip });
-}
+});

@@ -5,6 +5,7 @@ import type { AgentEvent } from "@/lib/agent/events";
 import { runTurn } from "@/lib/agent/run";
 import { getRepo } from "@/lib/data/repo";
 import type { Thread, Trip } from "@/lib/data/types";
+import { handle } from "@/lib/server/handle";
 
 export const dynamic = "force-dynamic";
 // Planning a trip is ~8–14 model calls plus a subagent; give it room on Vercel.
@@ -18,7 +19,7 @@ const body = z.object({
   thread: z.unknown().optional(),
 });
 
-export async function POST(req: Request) {
+export const POST = handle(async (req: Request) => {
   const parsed = body.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) return Response.json({ error: "Invalid request" }, { status: 400 });
   const { tripId, message } = parsed.data;
@@ -58,4 +59,4 @@ export async function POST(req: Request) {
   return new Response(stream, {
     headers: { "Content-Type": "application/x-ndjson; charset=utf-8", "Cache-Control": "no-store" },
   });
-}
+});

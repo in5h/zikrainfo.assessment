@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import type { TranscriptEntry } from "@/lib/agent/events";
 import type { TripCheck } from "@/lib/agent/itinerary";
 import type { City, StoredFile, Todo, Trip } from "@/lib/data/types";
+import { fetchJson } from "@/lib/client/fetch-json";
 import { tripStore } from "@/lib/client/trip-store";
 import { cn } from "@/lib/utils";
 
@@ -145,24 +146,24 @@ export function Workspace() {
   const browser = useRef(false);
 
   const listTrips = useCallback(
-    async (): Promise<Trip[]> => (browser.current ? tripStore.list() : ((await fetch("/api/trips").then((r) => r.json())).trips ?? [])),
+    async (): Promise<Trip[]> => (browser.current ? tripStore.list() : ((await fetchJson<{ trips?: Trip[] }>("/api/trips")).trips ?? [])),
     []
   );
   const fetchDetail = useCallback(async (id: string): Promise<Detail> => {
-    if (!browser.current) return fetch(`/api/trips/${id}`).then((r) => r.json());
-    return fetch("/api/trips/view", {
+    if (!browser.current) return fetchJson<Detail>(`/api/trips/${id}`);
+    return fetchJson<Detail>("/api/trips/view", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ trip: tripStore.get(id), thread: tripStore.getThread(id) }),
-    }).then((r) => r.json());
+    });
   }, []);
 
   useEffect(() => {
     (async () => {
-      const st: Status = await fetch("/api/status").then((r) => r.json());
+      const st = await fetchJson<Status>("/api/status");
       browser.current = st.storage === "browser";
       setStatus(st);
-      const [c, t] = await Promise.all([fetch("/api/cities").then((r) => r.json()), listTrips()]);
+      const [c, t] = await Promise.all([fetchJson<{ cities: City[]; error?: string }>("/api/cities"), listTrips()]);
       if (c.error) throw new Error(c.error);
       setCities(c.cities);
       setTrips(t);
@@ -183,16 +184,21 @@ export function Workspace() {
     setShowTrips(false);
     setTodos([]);
     if (id)
-      fetchDetail(id).then((d) => {
-        setDetail(d);
-        setTodos(d.todos ?? []);
-      });
+      fetchDetail(id)
+        .then((d) => {
+          setDetail(d);
+          setTodos(d.todos ?? []);
+        })
+        .catch((e) => setError(e.message));
     window.scrollTo({ top: 0 });
   }, [fetchDetail]);
 
   const refresh = useCallback(() => {
     loadTrips();
-    if (selected) fetchDetail(selected).then((d) => setDetail((prev) => (prev ? { ...prev, trip: d.trip, check: d.check, files: d.files } : prev)));
+    if (selected)
+      fetchDetail(selected)
+        .then((d) => setDetail((prev) => (prev ? { ...prev, trip: d.trip, check: d.check, files: d.files } : prev)))
+        .catch(() => {});
   }, [selected, loadTrips, fetchDetail]);
 
   async function remove(id: string) {
@@ -219,7 +225,7 @@ export function Workspace() {
       <div className="mx-auto max-w-lg p-10 text-sm">
         <h1 className="mb-2 text-lg font-semibold">Couldn&apos;t load data</h1>
         <p className="text-muted-foreground">{error}</p>
-        <p className="mt-2 text-muted-foreground">If using Supabase, run the SQL in supabase/migrations first.</p>
+        <p className="mt-2 text-muted-foreground">Try refreshing the page. If it keeps happening, send this message to the developer.</p>
       </div>
     );
   }

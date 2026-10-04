@@ -8,8 +8,9 @@ import { LOCAL_EXPERT_PROMPT, SYSTEM_PROMPT } from "./knowledge";
 import { OfflinePlannerModel } from "./offline-model";
 import { allTools, expertTools } from "./tools";
 
-export const MAIN_MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
-export const SUBAGENT_MODEL = process.env.ANTHROPIC_SUBAGENT_MODEL || "claude-sonnet-5-5";
+import { MAIN_MODEL, SUBAGENT_MODEL } from "@/lib/config";
+
+export { MAIN_MODEL, SUBAGENT_MODEL };
 
 export function anthropic(model: string, effort: "low" | "medium" | "high", apiKey: string) {
   // Current Claude models reject sampling params (temperature/top_p) and run
